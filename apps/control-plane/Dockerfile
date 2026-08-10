@@ -9,7 +9,10 @@ COPY apps/control-plane ./apps/control-plane
 RUN pnpm install --frozen-lockfile
 RUN pnpm --filter @curb/shared --filter @curb/policy-engine --filter @curb/control-plane build
 # Drop dev dependencies (typescript, vitest, …) before they are copied into the runtime.
-RUN pnpm --filter @curb/shared --filter @curb/policy-engine --filter @curb/control-plane prune --prod
+# why not `pnpm prune --prod`: it rejects --filter, and unfiltered it prompts
+# for confirmation — a build that hangs on a TTY question is not a build.
+RUN pnpm install --prod --frozen-lockfile --ignore-scripts \
+      --config.confirmModulesPurge=false
 
 FROM node:20-slim
 WORKDIR /app
