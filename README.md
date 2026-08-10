@@ -11,12 +11,15 @@ and destructive tool calls — enforced by one policy engine, at every point whe
 your agent touches the outside world.
 
 [![CI](https://github.com/itsnevu/Curb/actions/workflows/ci.yml/badge.svg)](https://github.com/itsnevu/Curb/actions/workflows/ci.yml)
-[![tests](https://img.shields.io/badge/tests-264%20passing-2f6f4e)](#development)
-[![typescript](https://img.shields.io/badge/TypeScript-strict-3178c6)](#)
-[![python](https://img.shields.io/badge/Python-3.11%2B-3776ab)](#python-sdk)
+[![Release](https://github.com/itsnevu/Curb/actions/workflows/release.yml/badge.svg)](https://github.com/itsnevu/Curb/actions/workflows/release.yml)
+[![tests](https://img.shields.io/badge/tests-259%20passing-2f6f4e)](#development)
 [![license](https://img.shields.io/badge/license-MIT-6b6862)](LICENSE)
 
-[Quickstart](#quickstart-60-seconds) · [How it works](#how-it-works) · [Policies](#policy-reference) · [SDKs](#sdk-reference) · [API](#http-api) · [FAQ](#faq)
+[![npm](https://img.shields.io/npm/v/@curb/sdk?label=%40curb%2Fsdk&color=cb3837&logo=npm)](https://www.npmjs.com/package/@curb/sdk)
+[![PyPI](https://img.shields.io/pypi/v/curb-sdk?label=curb-sdk&color=3775a9&logo=pypi&logoColor=white)](https://pypi.org/project/curb-sdk/)
+[![images](https://img.shields.io/badge/ghcr.io-curb--gateway%20%C2%B7%20curb--control--plane-2496ed?logo=docker&logoColor=white)](https://github.com/itsnevu?tab=packages&repo_name=Curb)
+
+[Quickstart](#quickstart-60-seconds) · [Install](#install) · [How it works](#how-it-works) · [Policies](#policy-reference) · [SDKs](#sdk-reference) · [API](#http-api) · [FAQ](#faq)
 
 </div>
 
@@ -77,29 +80,54 @@ C. Dangerous action — held until a human decides
 
 The live dashboard is at the URL the demo prints (default <http://localhost:8090>).
 
-### Full stack
+---
 
-No clone needed — pull the released images:
+## Install
+
+Everything below is published. Nothing here needs a clone.
+
+### 1. Run the servers
 
 ```bash
 curl -O https://raw.githubusercontent.com/itsnevu/Curb/main/docker-compose.release.yml
 CURB_API_KEY=pick-your-own docker compose -f docker-compose.release.yml up -d
 ```
 
-Pin a release with `CURB_VERSION=0.1.0`; the default tracks `latest`. Images are
-published for both `linux/amd64` and `linux/arm64`.
-
-From a clone, to build the images from source instead:
-
-```bash
-cp .env.example .env
-docker compose up          # postgres + redis + gateway + control-plane + dashboard
-```
+Then open <http://localhost:8090> and sign in with that key.
 
 | Service | URL | Role |
 | :-- | :-- | :-- |
 | **Gateway** | <http://localhost:8080> | OpenAI/Anthropic-compatible proxy — cost, loop, rate, time |
 | **Control plane + dashboard** | <http://localhost:8090> | policies, Decision API, audit log, approval queue |
+
+Images are published for `linux/amd64` and `linux/arm64`:
+
+| Image | Tags |
+| :-- | :-- |
+| `ghcr.io/itsnevu/curb-gateway` | `0.1.0`, `0.1`, `latest` |
+| `ghcr.io/itsnevu/curb-control-plane` | `0.1.0`, `0.1`, `latest` |
+
+Pin a release with `CURB_VERSION=0.1.0`; the default tracks `latest`. **Pin it in
+production** — `latest` moving under you is exactly the kind of surprise Curb exists to
+prevent.
+
+### 2. Add an SDK (optional)
+
+The gateway alone gives you cost and loop protection with no code changes. Add an SDK
+when you want *ask-before-acting* on tool calls:
+
+```bash
+npm i @curb/sdk        # TypeScript — https://www.npmjs.com/package/@curb/sdk
+pip install curb-sdk   # Python 3.11+ — https://pypi.org/project/curb-sdk/
+```
+
+### Build from source instead
+
+```bash
+git clone https://github.com/itsnevu/Curb.git && cd Curb
+cp .env.example .env
+docker compose up          # postgres + redis + gateway + control-plane + dashboard
+```
 
 ---
 
@@ -192,9 +220,6 @@ chunk, and breakers are still evaluated **before** the stream opens.
 npm i @curb/sdk        # TypeScript
 pip install curb-sdk   # Python
 ```
-
-> Available from the `v0.1.0` release onward. Working from a clone before then:
-> `pnpm add @curb/sdk --workspace`, or `pip install -e ./sdks/python`.
 
 **TypeScript**
 
@@ -296,6 +321,29 @@ interface Policy {
 | `time_limit` | `maxWallClockMs` | Run older than the limit | Gateway + SDK |
 | `step_limit` | `maxSteps` | Steps beyond the limit | SDK |
 | `tool_permission` | `tools[]`, `sensitivity`, `mode` (optional override) | A tool matches by name or sensitivity | SDK |
+
+### Narrowing a policy: `scope` vs `when`
+
+These two are easy to mix up, and picking the wrong one is the difference between a
+prod-only rule and a rule that fires everywhere.
+
+| | Accepts | Matches on |
+| :-- | :-- | :-- |
+| `scope` | **only** `org`, `project`, `run`, `tool` | identity — *which* run, tool, or project |
+| `when` | any key | context — `env`, plus anything you pass in `meta` |
+
+```jsonc
+{
+  "scope": { "tool": "delete_file" },   // this tool
+  "when":  { "env": "prod" }            // and only in prod
+}
+```
+
+**`scope` rejects keys it does not recognise.** `{"scope": {"env": "prod"}}` returns `400
+Unrecognized key(s) in object: 'env'` rather than quietly dropping it — a discarded scope key
+silently widens a policy you thought you had narrowed, which is worse than no policy at all.
+The same strictness applies to `params`, so a typo like `maxUSD` fails at write time instead
+of at 3am.
 
 **`action` decides what happens when a policy trips** — `deny`, `ask`, `throttle`, or `allow`
 (which turns the rule into a no-op you can keep around). The evaluator decides *whether* the
@@ -429,15 +477,19 @@ Raises `PolicyViolation` (with `.policy_id`, `.tool_name`) and `ApprovalTimeout`
 ## Project structure
 
 ```
-packages/shared          shared types + Zod schemas
+packages/shared          shared types + Zod schemas          → npm @curb/shared
 packages/policy-engine   ★ pure engine, 6 policies, state stores (memory + Redis)
-packages/sdk-ts          TypeScript SDK (guardrails)
-sdks/python              Python SDK (guardrails)
-apps/gateway             OpenAI/Anthropic proxy (circuit breaker)
-apps/control-plane       API + Postgres + dashboard + approvals
+packages/sdk-ts          TypeScript SDK (guardrails)         → npm @curb/sdk
+sdks/python              Python SDK (guardrails)             → PyPI curb-sdk
+apps/gateway             OpenAI/Anthropic proxy              → ghcr.io curb-gateway
+apps/control-plane       API + Postgres + dashboard          → ghcr.io curb-control-plane
 examples/                framework wiring examples
 scripts/demo.ts          60-second end-to-end demo
 ```
+
+`packages/policy-engine` is deliberately unpublished: the servers that use it ship as images,
+and agents talk to Curb over HTTP, so publishing it would commit the project to an API surface
+nobody needs yet.
 
 **Tech:** TypeScript (Node 20+, ESM, strict) · Python 3.11+ · Fastify · Postgres · Redis ·
 Zod / Pydantic · Vitest / pytest · pnpm workspaces.
@@ -448,7 +500,7 @@ Zod / Pydantic · Vitest / pytest · pnpm workspaces.
 
 ```bash
 pnpm install
-pnpm test          # 222 TypeScript tests (235 with Postgres + Redis running)
+pnpm test          # 225 TypeScript tests (238 with Postgres + Redis running)
 pnpm typecheck     # build + tsc --noEmit across every package
 pnpm demo          # end-to-end demo in a single process
 
@@ -466,6 +518,22 @@ docker compose up -d postgres redis
 DATABASE_URL=postgresql://curb:curb@localhost:5432/curb pnpm --filter @curb/control-plane test
 REDIS_URL=redis://localhost:6379 pnpm --filter @curb/policy-engine test
 ```
+
+### Cutting a release
+
+Releasing is one action: push a tag. [`release.yml`](.github/workflows/release.yml) runs the
+full suite first, then publishes the GHCR images, npm packages, and the PyPI wheel, and finally
+boots the images it just pushed and smoke-tests them.
+
+```bash
+# 1. bump the version in packages/sdk-ts, packages/shared, sdks/python/pyproject.toml
+# 2. tag it — the workflow refuses to publish if the tag and those three disagree
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+One-time setup, already done for this repo: an `NPM_TOKEN` repository secret, and a PyPI
+trusted publisher pointing at `itsnevu/Curb` + `release.yml`. GHCR needs nothing — it
+authenticates with the built-in `GITHUB_TOKEN`.
 
 ---
 
@@ -505,11 +573,20 @@ the audit log — only a hash used for loop detection. Tool arguments are redact
 OpenAI and Anthropic message APIs, including streaming. Any OpenAI-compatible endpoint works by
 pointing `OPENAI_UPSTREAM` at it.
 
+**Do cost caps work if I only use the SDK?**
+Partly, and this is worth knowing. `cost_cap` accumulates real spend at the **gateway**, which
+is the component that sees token usage. Through the SDK alone, a cap still refuses any single
+call whose estimate would break the limit, but cumulative run spend is only tracked for traffic
+routed through the gateway. Point your LLM client at the gateway to get the full cap.
+
 **Is it production-ready?**
-The engine, gateway, SDKs, and approval flow are covered by 264 tests (235 TypeScript — 13 of them needing live Postgres/Redis — plus 21 Python) including end-to-end runs,
-and CI exercises Postgres, Redis, and the full Docker Compose stack on every push. Two honest
-caveats: it has never been pointed at a real OpenAI or Anthropic endpoint (only a faithful fake
-upstream), and it is not multi-region or HA. The SDKs are not published to npm/PyPI yet.
+The engine, gateway, SDKs, and approval flow are covered by 259 tests (238 TypeScript — 13 of
+them needing live Postgres/Redis — plus 21 Python) including end-to-end runs, and CI exercises
+Postgres, Redis, and the full Docker Compose stack on every push. Every release additionally
+boots the published images and smoke-tests them before the tag is considered good.
+
+Two honest caveats: it has never been pointed at a real OpenAI or Anthropic endpoint (only a
+faithful fake upstream), and it is not multi-region or HA.
 
 ---
 
@@ -522,6 +599,8 @@ upstream), and it is not multi-region or HA. The SDKs are not published to npm/P
 - [x] Webhook / Slack alerts, Docker Compose, demo
 - [x] CI: build, typecheck, tests against real Postgres + Redis, and a Docker Compose smoke test
 - [x] Release automation: one tag publishes GHCR images, npm, and PyPI ([release.yml](.github/workflows/release.yml))
+- [x] **v0.1.0 published** — `ghcr.io/itsnevu/curb-*`, [`@curb/sdk`](https://www.npmjs.com/package/@curb/sdk), [`curb-sdk`](https://pypi.org/project/curb-sdk/)
+- [ ] npm trusted publishing (OIDC), before 2FA-bypass tokens are cut off in Jan 2027
 - [ ] Per-org multi-tenancy and RBAC
 - [ ] More providers (Gemini, Bedrock, OpenAI-compatible gateways)
 - [ ] Multi-agent traffic control
