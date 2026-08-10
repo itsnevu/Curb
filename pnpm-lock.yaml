@@ -50,6 +50,10 @@ importers:
       undici:
         specifier: ^6.19.0
         version: 6.28.0
+    devDependencies:
+      vitest:
+        specifier: ^2.0.0
+        version: 2.1.9(@types/node@26.2.0)
 
   packages/policy-engine:
     dependencies:
@@ -86,6 +90,9 @@ importers:
       '@types/node':
         specifier: ^26.2.0
         version: 26.2.0
+      vitest:
+        specifier: ^2.0.0
+        version: 2.1.9(@types/node@26.2.0)
 
 packages:
 

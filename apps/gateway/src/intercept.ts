@@ -1,35 +1,34 @@
 import { request } from "undici";
+import type { UpstreamResponse } from "./app.js";
 
-const UPSTREAM = process.env.OPENAI_UPSTREAM ?? "https://api.openai.com";
-
-export async function forwardUpstream(url: string, headers: any, body: unknown) {
-  const clean = { ...headers };
-  delete clean["host"]; delete clean["content-length"];
-  delete clean["x-curb-run-id"]; delete clean["x-curb-key"];
-  const res = await request(`${UPSTREAM}${url}`, {
+/**
+ * Forwarder nyata ke provider. Dipisah dari app.ts supaya test bisa
+ * menyuntik upstream palsu tanpa jaringan.
+ */
+export async function forwardUpstream(
+  url: string,
+  headers: Record<string, string>,
+  body: unknown,
+  streaming: boolean,
+): Promise<UpstreamResponse> {
+  const res = await request(url, {
     method: "POST",
-    headers: clean,
+    headers: { ...headers, "content-type": "application/json" },
     body: JSON.stringify(body),
+    // why: streaming bisa lama menganggur di antara token — jangan putus.
+    headersTimeout: streaming ? 120_000 : 60_000,
+    bodyTimeout: streaming ? 0 : 120_000,
   });
-  const json = await res.body.json();
-  return { status: res.statusCode, json };
-}
 
-export function extractUsage(json: any): { promptTokens: number; completionTokens: number; totalTokens: number } {
-  const u = json?.usage ?? {};
-  const promptTokens = u.prompt_tokens ?? u.input_tokens ?? 0;
-  const completionTokens = u.completion_tokens ?? u.output_tokens ?? 0;
-  return { promptTokens, completionTokens, totalTokens: u.total_tokens ?? promptTokens + completionTokens };
-}
-
-// TODO(M1): tabel harga per-model yang bener & bisa dikonfigurasi.
-const PRICE: Record<string, { in: number; out: number }> = {
-  "gpt-4o": { in: 2.5 / 1e6, out: 10 / 1e6 },
-  "gpt-4o-mini": { in: 0.15 / 1e6, out: 0.6 / 1e6 },
-  default: { in: 1 / 1e6, out: 3 / 1e6 },
-};
-
-export function estimateCostUsd(model: string | undefined, u: { promptTokens: number; completionTokens: number }) {
-  const p = PRICE[model ?? "default"] ?? PRICE.default;
-  return u.promptTokens * p.in + u.completionTokens * p.out;
+  if (streaming) {
+    return { status: res.statusCode, headers: res.headers, stream: res.body };
+  }
+  const text = await res.body.text();
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    json = { error: { message: text.slice(0, 500), type: "upstream_non_json" } };
+  }
+  return { status: res.statusCode, headers: res.headers, json };
 }

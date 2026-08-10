@@ -15,5 +15,8 @@
     "fastify": "^4.28.0",
     "ioredis": "^5.4.0",
     "undici": "^6.19.0"
+  },
+  "devDependencies": {
+    "vitest": "^2.0.0"
   }
 }
