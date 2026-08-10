@@ -422,6 +422,12 @@ restart doesn't halt anything.
 One local hop plus a synchronous, in-process policy evaluation — no database call on the hot
 path. Audit is fire-and-forget and never blocks the request.
 
+**How is the dashboard protected?**
+The page itself is public (you need it to sign in), but it contains no credential. You enter a
+project API key, the browser validates it and keeps it in `sessionStorage` for that tab only,
+and every request carries it explicitly. There is no shared session cookie and no key baked
+into the HTML. For anything beyond a trusted network, put it behind your own SSO proxy.
+
 **Are my prompts and API keys stored?**
 Your provider API key is forwarded upstream and never persisted. Prompts are never written to
 the audit log — only a hash used for loop detection. Tool arguments are redacted before storage.

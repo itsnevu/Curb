@@ -30,7 +30,7 @@ async function main() {
   await repo.upsertProject({ id: "demo", orgId: "demo", name: "demo", apiKeyHash: hashApiKey(KEY) });
   const store = new InMemoryRunStateStore(() => Date.now());
 
-  const cp = buildControlPlane({ repo, store, dashboardApiKey: KEY });
+  const cp = buildControlPlane({ repo, store });
   await cp.listen({ port: Number(process.env.CONTROL_PLANE_PORT ?? 8090), host: "127.0.0.1" });
   const cpUrl = addrOf(cp.server.address());
 

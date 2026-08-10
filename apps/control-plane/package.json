@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.json && cp -r src/public dist/public && cp -r src/db dist/db",
+    "build": "tsc -p tsconfig.json && mkdir -p dist/public dist/db && cp -R src/public/. dist/public/ && cp -R src/db/. dist/db/",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "start": "node dist/index.js",
     "test": "vitest run"

@@ -21,7 +21,6 @@ const app = buildApp({
   store,
   failMode: process.env.CURB_FAIL_MODE === "open" ? "open" : "closed",
   logger: true,
-  dashboardApiKey: process.env.CURB_API_KEY,
   notifier: notifierFromEnv({ onError: (err) => app.log.warn({ err }, "alert delivery failed") }),
 });
 

@@ -49,6 +49,13 @@
   input, select, textarea { font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); width: 100%; }
   textarea { font-family: ui-monospace, Menlo, monospace; font-size: 12px; min-height: 34px; }
   .err { color: var(--deny); padding: 0 16px 12px; }
+  #login { display: grid; place-items: center; padding: 60px 24px; }
+  #login form { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+                padding: 24px; width: min(420px, 100%); display: grid; gap: 12px; }
+  #login h2 { margin: 0; font-size: 16px; }
+  #login p { margin: 0; color: var(--muted); font-size: 13px; }
+  #login .err { padding: 0; }
+  header .out { font-size: 12px; padding: 2px 10px; }
 </style>
 </head>
 <body>
@@ -56,9 +63,22 @@
   <h1>Curb</h1>
   <span class="sub">guardrails and circuit breakers for AI agents</span>
   <span class="dot" id="pulse">connecting…</span>
+  <button class="out" id="signOut" hidden>Sign out</button>
 </header>
 
-<main>
+<div id="login" hidden>
+  <form id="loginForm">
+    <h2>Sign in</h2>
+    <p>Enter a project API key. It is kept in this tab only (<code>sessionStorage</code>)
+       and is never stored on the server.</p>
+    <label>API key<input name="key" type="password" autocomplete="current-password"
+           placeholder="CURB_API_KEY" required autofocus /></label>
+    <button type="submit" class="ok">Sign in</button>
+    <div class="err" id="loginErr"></div>
+  </form>
+</div>
+
+<main hidden>
   <div class="stats" id="stats"></div>
 
   <section>
@@ -111,15 +131,22 @@
 </main>
 
 <script>
-const KEY = "__CURB_API_KEY__";
-const H = { "x-curb-key": KEY, "content-type": "application/json" };
+// why: the key lives in this tab only. The page is served unauthenticated, so a
+// server-injected key would be readable by anyone who can reach the dashboard.
+const STORE_KEY = "curb.apiKey";
+let KEY = sessionStorage.getItem(STORE_KEY) || "";
+const H = () => ({ "x-curb-key": KEY, "content-type": "application/json" });
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const usd = (n) => "$" + Number(n || 0).toFixed(4);
 const time = (ts) => ts ? new Date(ts).toLocaleTimeString("en-US") : "—";
 
 async function api(path, opts = {}) {
-  const res = await fetch(path, { headers: H, ...opts });
+  const res = await fetch(path, { headers: H(), ...opts });
+  if (res.status === 401) {
+    signOut();
+    throw new Error("session expired — sign in again");
+  }
   if (!res.ok) throw new Error((await res.text()).slice(0, 200));
   return res.json();
 }
@@ -250,8 +277,47 @@ $("policyForm").addEventListener("submit", async (ev) => {
   }
 });
 
-refresh();
-setInterval(refresh, 2000);
+let timer = null;
+
+function showApp(on) {
+  $("login").hidden = on;
+  document.querySelector("main").hidden = !on;
+  $("signOut").hidden = !on;
+}
+
+function signOut() {
+  sessionStorage.removeItem(STORE_KEY);
+  KEY = "";
+  if (timer) { clearInterval(timer); timer = null; }
+  showApp(false);
+  $("pulse").textContent = "signed out";
+}
+
+async function signIn(key) {
+  const res = await fetch("/v1/stats", { headers: { "x-curb-key": key } });
+  if (!res.ok) throw new Error(res.status === 401 ? "that key was not accepted" : `server error ${res.status}`);
+  KEY = key;
+  sessionStorage.setItem(STORE_KEY, key);
+  showApp(true);
+  await refresh();
+  if (!timer) timer = setInterval(refresh, 2000);
+}
+
+$("signOut").addEventListener("click", signOut);
+
+$("loginForm").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  $("loginErr").textContent = "";
+  try {
+    await signIn(new FormData(ev.target).get("key"));
+  } catch (err) {
+    $("loginErr").textContent = err.message;
+  }
+});
+
+// A key already in this tab (e.g. after a reload) is revalidated, never trusted blindly.
+if (KEY) signIn(KEY).catch(() => signOut());
+else showApp(false);
 </script>
 </body>
 </html>

@@ -223,6 +223,20 @@ describe("dashboard", () => {
     expect(res.headers["content-type"]).toContain("text/html");
     expect(res.body).toContain("Approval queue");
   });
+
+  it("NEVER embeds an API key in the served page", async () => {
+    // why: `GET /` is unauthenticated by design, so a key baked into the HTML would
+    // hand full API access to anyone who can reach the dashboard.
+    const res = await app.inject({ method: "GET", url: "/" });
+    expect(res.body).not.toContain(KEY);
+    expect(res.body).not.toContain("__CURB_API_KEY__");
+  });
+
+  it("asks the browser to sign in and keeps the key in the tab only", async () => {
+    const body = (await app.inject({ method: "GET", url: "/" })).body;
+    expect(body).toContain("sessionStorage");
+    expect(body).toContain("loginForm");
+  });
 });
 
 describe("fail mode", () => {

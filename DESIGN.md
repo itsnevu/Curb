@@ -228,6 +228,10 @@ on the dashboard (or in Slack), clicks Approve or Deny, and the SDK either proce
 - **Auth is required everywhere** except `/health` and the dashboard shell — including the
   Decision API, since an unauthenticated decision endpoint would let anyone read another
   project's policies or forge runs.
+- **The dashboard shell carries no credential.** `GET /` is unauthenticated by necessity (you
+  need the page in order to sign in), so the server never injects a key into the HTML. The
+  browser prompts for the API key, validates it against `/v1/stats`, and keeps it in
+  `sessionStorage` for that tab only. A `401` from any call signs the tab out.
 
 ---
 

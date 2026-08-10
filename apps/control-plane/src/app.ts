@@ -20,8 +20,6 @@ export interface ControlPlaneDeps {
   now?: () => number;
   failMode?: "open" | "closed";
   logger?: boolean;
-  /** The dashboard needs a key to call its own API from the browser. */
-  dashboardApiKey?: string;
   notifier?: Notifier;
 }
 
@@ -33,13 +31,11 @@ export function buildApp(deps: ControlPlaneDeps): FastifyInstance {
   app.get("/health", async () => ({ ok: true, service: "curb-control-plane" }));
 
   // Dashboard: a single HTML file with no build step, served directly by Fastify.
-  app.get("/", async (_req, reply) => {
-    const html = readFileSync(join(HERE, "public", "dashboard.html"), "utf8").replace(
-      "__CURB_API_KEY__",
-      deps.dashboardApiKey ?? "",
-    );
-    return reply.type("text/html; charset=utf-8").send(html);
-  });
+  // why: this page is served WITHOUT auth (you need it to log in), so it must never
+  // contain a key. The browser asks for the API key, keeps it in sessionStorage, and
+  // sends it per request — the server never embeds a credential in the HTML.
+  const dashboard = readFileSync(join(HERE, "public", "dashboard.html"), "utf8");
+  app.get("/", async (_req, reply) => reply.type("text/html; charset=utf-8").send(dashboard));
 
   app.register(async (api) => {
     api.addHook("preHandler", makeAuth(deps.repo));
