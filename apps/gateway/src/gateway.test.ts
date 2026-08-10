@@ -381,3 +381,50 @@ describe("secretsMatch", () => {
     expect(secretsMatch("short", "a-much-longer-secret")).toBe(false);
   });
 });
+
+describe("gateway — cost_cap across runs (hour window)", () => {
+  /** The point of a wider window: starting a new run must not reset the budget. */
+  const hourly = (maxUsd: number) =>
+    P({ id: "hc", type: "cost_cap", params: { maxUsd, window: "hour", preflight: false } });
+
+  it("spend from an earlier run still counts against a brand-new run", async () => {
+    const h = harness([hourly(0.005)]);
+    // run A burns $0.002 per call
+    expect((await post(h.app, "run-a")).statusCode).toBe(200);
+    expect((await post(h.app, "run-a")).statusCode).toBe(200);
+    expect((await post(h.app, "run-a")).statusCode).toBe(200); // hourly total now $0.006
+
+    const freshRun = await post(h.app, "run-b");
+    expect(freshRun.statusCode).toBe(429);
+    expect((freshRun.json() as { error: { message: string } }).error.message).toContain("last hour");
+  });
+
+  it("a run-scoped cap is NOT affected by another run's spend", async () => {
+    const perRun = P({ id: "rc", type: "cost_cap", params: { maxUsd: 0.005, preflight: false } });
+    const h = harness([perRun]);
+    for (let i = 0; i < 3; i++) await post(h.app, "run-a");
+    expect((await post(h.app, "run-b")).statusCode).toBe(200);
+  });
+
+  it("the hourly bucket rolls over with the clock", async () => {
+    let clock = 1_700_000_000_000;
+    const store = new InMemoryRunStateStore(() => clock);
+    const up = makeUpstream();
+    const app = buildApp({
+      store, loadPolicies: async () => [hourly(0.005)], forward: up.forward,
+      prices: PRICES, now: () => clock,
+    });
+    const call = (runId: string) =>
+      app.inject({
+        method: "POST", url: "/v1/chat/completions",
+        headers: { "x-curb-run-id": runId, "content-type": "application/json" },
+        payload: { model: "fake-model", max_tokens: 10, messages: [{ role: "user", content: "hi" }] },
+      });
+
+    for (let i = 0; i < 3; i++) await call("run-a");
+    expect((await call("run-b")).statusCode).toBe(429);
+
+    clock += 60 * 60 * 1000 + 1000; // next hour
+    expect((await call("run-c")).statusCode).toBe(200);
+  });
+});

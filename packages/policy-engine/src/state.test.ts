@@ -90,6 +90,35 @@ describe.each(makers)("%s", (_name, make) => {
     expect(s.sigWindow).toEqual([]);
   });
 
+  it("a cost bucket starts empty and accumulates", async () => {
+    // why: these buckets are what make cost_cap window:"hour"/"day" work. If they
+    // silently read 0, the cap fails OPEN — on money.
+    const key = { bucket: `b-${_name}`, ttlSeconds: 60 };
+    expect(await store.getCost(key.bucket)).toBe(0);
+    expect(await store.bumpCost(key, 0.25)).toBeCloseTo(0.25, 6);
+    expect(await store.bumpCost(key, 0.5)).toBeCloseTo(0.75, 6);
+    expect(await store.getCost(key.bucket)).toBeCloseTo(0.75, 6);
+  });
+
+  it("different buckets never share a total", async () => {
+    const a = { bucket: `x-${_name}`, ttlSeconds: 60 };
+    const b = { bucket: `y-${_name}`, ttlSeconds: 60 };
+    await store.bumpCost(a, 1);
+    await store.bumpCost(b, 2);
+    expect(await store.getCost(a.bucket)).toBeCloseTo(1, 6);
+    expect(await store.getCost(b.bucket)).toBeCloseTo(2, 6);
+  });
+
+  it("concurrent cost bumps lose nothing", async () => {
+    const key = { bucket: `c-${_name}`, ttlSeconds: 60 };
+    await Promise.all(Array.from({ length: 20 }, () => store.bumpCost(key, 0.05)));
+    expect(await store.getCost(key.bucket)).toBeCloseTo(1, 6);
+  });
+
+  it("an unknown bucket reads 0 rather than throwing", async () => {
+    expect(await store.getCost("never-written")).toBe(0);
+  });
+
   it("startedAt is recorded once and never changes", async () => {
     await store.bump("r1", { steps: 1 });
     const first = (await store.get("r1")).startedAt;

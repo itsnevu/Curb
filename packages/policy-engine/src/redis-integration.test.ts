@@ -48,6 +48,23 @@ suite("RedisRunStateStore against a real Redis", () => {
     expect((await store.get(runId)).sigWindow).toEqual(["c", "d", "e"]);
   });
 
+  it("cost buckets survive as INCRBYFLOAT and carry a TTL", async () => {
+    const key = { bucket: `itest-${process.pid}`, ttlSeconds: 90 };
+    await store.bumpCost(key, 0.000001);
+    await store.bumpCost(key, 0.000002);
+    expect(await store.getCost(key.bucket)).toBeCloseTo(0.000003, 9);
+
+    const ttl = await redis.ttl(`curb:run:cost:${key.bucket}`);
+    expect(ttl).toBeGreaterThan(0);
+    expect(ttl).toBeLessThanOrEqual(90);
+  });
+
+  it("50 parallel cost bumps against real Redis lose nothing", async () => {
+    const key = { bucket: `itest-par-${process.pid}`, ttlSeconds: 90 };
+    await Promise.all(Array.from({ length: 50 }, () => store.bumpCost(key, 0.02)));
+    expect(await store.getCost(key.bucket)).toBeCloseTo(1, 6);
+  });
+
   it("a TTL is set on the run key", async () => {
     await store.bump(runId, { steps: 1 });
     const ttl = await redis.ttl(`curb:run:${runId}`);

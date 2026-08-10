@@ -66,6 +66,30 @@ describe("policy CRUD", () => {
     await app.inject({ method: "DELETE", url: `/v1/policies/${id}`, headers: H });
     expect((await get("/v1/policies")).json()).toHaveLength(0);
   });
+  describe("params are validated at write time", () => {
+    // why: a policy with wrong params is worse than no policy — it looks like
+    // protection and protects nothing. Better to fail on write than at 3am.
+    const bad: Array<[string, string, unknown]> = [
+      ["a typo in the param name", "cost_cap", { maxUSD: 2 }],
+      ["a negative cap", "cost_cap", { maxUsd: -5 }],
+      ["a numeric cap sent as a string", "cost_cap", { maxUsd: "2" }],
+      ["an unknown window", "cost_cap", { maxUsd: 2, window: "week" }],
+      ["a tool_permission that would match nothing", "tool_permission", {}],
+      ["maxRepeats below 2 (every call repeats itself once)", "loop_detect", { maxRepeats: 1 }],
+    ];
+    for (const [label, type, params] of bad) {
+      it(`rejects ${label}`, async () => {
+        const res = await post("/v1/policies", policy({ type, params }));
+        expect(res.statusCode).toBe(400);
+      });
+    }
+
+    it("fills in documented defaults so the engine never has to guess", async () => {
+      const created = (await post("/v1/policies", policy({ type: "cost_cap", params: { maxUsd: 2 } }))).json();
+      expect(created.params).toMatchObject({ maxUsd: 2, window: "run", preflight: true });
+    });
+  });
+
   it("404 for a policy that does not exist", async () => {
     expect((await get("/v1/policies/does-not-exist")).statusCode).toBe(404);
   });
