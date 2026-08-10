@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="asset/curb-mark.png" alt="Curb" width="104" height="104" />
+
 # Curb
 
 **Guardrails and circuit breakers for AI agents.**
@@ -8,7 +10,8 @@ Stop runaway agents before they cost you money: infinite loops, cost blowups,
 and destructive tool calls — enforced by one policy engine, at every point where
 your agent touches the outside world.
 
-[![tests](https://img.shields.io/badge/tests-175%20passing-2f6f4e)](#development)
+[![CI](https://github.com/itsnevu/Curb/actions/workflows/ci.yml/badge.svg)](https://github.com/itsnevu/Curb/actions/workflows/ci.yml)
+[![tests](https://img.shields.io/badge/tests-177%20passing-2f6f4e)](#development)
 [![typescript](https://img.shields.io/badge/TypeScript-strict-3178c6)](#)
 [![python](https://img.shields.io/badge/Python-3.11%2B-3776ab)](#python-sdk)
 [![license](https://img.shields.io/badge/license-MIT-6b6862)](LICENSE)
@@ -157,6 +160,10 @@ Streaming works: SSE is passed through untouched while usage is accumulated from
 chunk, and breakers are still evaluated **before** the stream opens.
 
 ### 2. Guardrails (human approval before dangerous actions)
+
+> **Not on npm/PyPI yet.** Until the packages are published, use them from a clone:
+> `pnpm add @curb/sdk --workspace` inside this repo, or
+> `pip install -e ./sdks/python` for Python. Tracked in the [roadmap](#roadmap).
 
 **TypeScript**
 
@@ -386,7 +393,7 @@ Zod / Pydantic · Vitest / pytest · pnpm workspaces.
 
 ```bash
 pnpm install
-pnpm test          # 155 TypeScript tests
+pnpm test          # 157 TypeScript tests
 pnpm typecheck     # build + tsc --noEmit across every package
 pnpm demo          # end-to-end demo in a single process
 
@@ -437,9 +444,10 @@ OpenAI and Anthropic message APIs, including streaming. Any OpenAI-compatible en
 pointing `OPENAI_UPSTREAM` at it.
 
 **Is it production-ready?**
-The engine, gateway, SDKs, and approval flow are covered by 175 tests including end-to-end runs.
-Postgres persistence has a full integration suite that requires you to run it against your own
-database once. It is not yet multi-region or HA.
+The engine, gateway, SDKs, and approval flow are covered by 177 tests including end-to-end runs,
+and CI exercises Postgres, Redis, and the full Docker Compose stack on every push. Two honest
+caveats: it has never been pointed at a real OpenAI or Anthropic endpoint (only a faithful fake
+upstream), and it is not multi-region or HA. The SDKs are not published to npm/PyPI yet.
 
 ---
 
@@ -450,7 +458,8 @@ database once. It is not yet multi-region or HA.
 - [x] Control plane: Postgres, audit log, dashboard
 - [x] SDKs: TypeScript + Python with ask-before-acting
 - [x] Webhook / Slack alerts, Docker Compose, demo
-- [ ] Postgres suite verified in CI
+- [x] CI: build, typecheck, tests against real Postgres + Redis, and a Docker Compose smoke test
+- [ ] Publish `@curb/sdk` to npm and `curb-sdk` to PyPI
 - [ ] Per-org multi-tenancy and RBAC
 - [ ] More providers (Gemini, Bedrock, OpenAI-compatible gateways)
 - [ ] Multi-agent traffic control
