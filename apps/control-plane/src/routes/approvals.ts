@@ -31,9 +31,9 @@ export function registerApprovals(
     const waitMs = Math.min(Number(wait ?? 0) || 0, MAX_WAIT_MS);
 
     const approval = waitMs > 0 ? await hub.wait(id, waitMs) : await repo.getApproval(id);
-    if (!approval) return reply.code(404).send({ error: { message: "approval tidak ditemukan" } });
+    if (!approval) return reply.code(404).send({ error: { message: "approval not found" } });
     if (approval.projectId && approval.projectId !== req.project!.id) {
-      return reply.code(404).send({ error: { message: "approval tidak ditemukan" } });
+      return reply.code(404).send({ error: { message: "approval not found" } });
     }
     return approval;
   });
@@ -42,11 +42,11 @@ export function registerApprovals(
     const { id } = req.params as { id: string };
     const parsed = DecideSchema.safeParse(req.body ?? {});
     if (!parsed.success) {
-      return reply.code(400).send({ error: { message: "body tidak valid" } });
+      return reply.code(400).send({ error: { message: "invalid request body" } });
     }
     const existing = await repo.getApproval(id);
     if (!existing || (existing.projectId && existing.projectId !== req.project!.id)) {
-      return reply.code(404).send({ error: { message: "approval tidak ditemukan" } });
+      return reply.code(404).send({ error: { message: "approval not found" } });
     }
     const decided = await repo.decideApproval(
       id,
@@ -54,7 +54,7 @@ export function registerApprovals(
       parsed.data.by,
       now(),
     );
-    if (!decided) return reply.code(404).send({ error: { message: "approval tidak ditemukan" } });
+    if (!decided) return reply.code(404).send({ error: { message: "approval not found" } });
 
     await repo.appendEvents([
       {
@@ -64,7 +64,7 @@ export function registerApprovals(
         kind: "approval",
         effect: decided.status === "approved" ? "ALLOW" : "DENY",
         policyId: decided.policyId,
-        reason: `approval ${decided.status} oleh ${decided.decidedBy}`,
+        reason: `approval ${decided.status} by ${decided.decidedBy}`,
         context: { approvalId: id, toolName: decided.toolName },
       },
     ]);

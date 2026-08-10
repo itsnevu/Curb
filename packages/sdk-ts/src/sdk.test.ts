@@ -169,7 +169,7 @@ describe("fail mode saat control plane mati", () => {
   it("fail-closed (default) → tool ditolak", async () => {
     const server = fakeServer({ decision: { effect: "ALLOW" }, failDecide: true });
     const fn = vi.fn();
-    await expect(curbWith(server).wrapTool(fn, { name: "t" })()).rejects.toThrow(/tidak terjangkau/);
+    await expect(curbWith(server).wrapTool(fn, { name: "t" })()).rejects.toThrow(/unreachable/);
     expect(fn).not.toHaveBeenCalled();
   });
 

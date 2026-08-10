@@ -7,7 +7,7 @@ export class PolicyViolation extends Error {
   readonly toolName?: string;
 
   constructor(decision: Decision, toolName?: string) {
-    super(decision.reason ?? "aksi ditolak oleh policy Curb");
+    super(decision.reason ?? "action denied by Curb policy");
     this.name = "PolicyViolation";
     this.decision = decision;
     this.policyId = decision.policyId;
@@ -22,7 +22,7 @@ export class ApprovalTimeout extends PolicyViolation {
       {
         effect: "DENY",
         policyId: "curb_approval_timeout",
-        reason: `approval ${approvalId} tidak diputuskan dalam ${waitedMs}ms`,
+        reason: `approval ${approvalId} was not decided within ${waitedMs}ms`,
       },
       toolName,
     );

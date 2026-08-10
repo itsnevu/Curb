@@ -15,7 +15,7 @@ const store: RunStateStore = process.env.REDIS_URL
   : new InMemoryRunStateStore(() => Date.now());
 
 const audit: AuditSink = controlPlaneUrl
-  ? new HttpAuditSink(controlPlaneUrl, { apiKey, onError: (e) => app.log.warn({ e }, "audit gagal") })
+  ? new HttpAuditSink(controlPlaneUrl, { apiKey, onError: (e) => app.log.warn({ e }, "audit delivery failed") })
   : NULL_SINK;
 
 const policySource = new PolicySource({ controlPlaneUrl, apiKey });
@@ -36,10 +36,10 @@ app
   .then(() => {
     app.log.info(
       { port, store: process.env.REDIS_URL ? "redis" : "memory", controlPlaneUrl },
-      "curb gateway siap",
+      "curb gateway ready",
     );
   })
   .catch((err) => {
-    app.log.error({ err }, "gateway gagal start");
+    app.log.error({ err }, "gateway failed to start");
     process.exit(1);
   });

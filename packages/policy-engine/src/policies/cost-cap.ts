@@ -11,7 +11,7 @@ export const costCap: PolicyEvaluator = (_ctx, policy, state) => {
     return {
       effect: "DENY",
       policyId: policy.id,
-      reason: `cost_cap: run mencapai $${state.costUsd.toFixed(4)} (batas $${maxUsd})`,
+      reason: `cost_cap: run reached $${state.costUsd.toFixed(4)} (limit $${maxUsd})`,
     };
   }
   return { effect: "ALLOW" };

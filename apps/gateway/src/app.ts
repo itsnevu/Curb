@@ -145,10 +145,10 @@ async function decide(
   try {
     return evaluate(ctx, await deps.loadPolicies(), state);
   } catch (err) {
-    log.error({ err }, "policy evaluation gagal");
+    log.error({ err }, "policy evaluation failed");
     return failMode === "open"
-      ? { effect: "ALLOW", reason: "engine tidak tersedia (fail-open)" }
-      : { effect: "DENY", policyId: "curb_fail_closed", reason: "policy engine tidak tersedia (fail-closed)" };
+      ? { effect: "ALLOW", reason: "policy engine unavailable (fail-open)" }
+      : { effect: "DENY", policyId: "curb_fail_closed", reason: "policy engine unavailable (fail-closed)" };
   }
 }
 

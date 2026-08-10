@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="id">
+<html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -54,45 +54,45 @@
 <body>
 <header>
   <h1>Curb</h1>
-  <span class="sub">control plane keamanan untuk AI agent</span>
-  <span class="dot" id="pulse">menyambung…</span>
+  <span class="sub">guardrails and circuit breakers for AI agents</span>
+  <span class="dot" id="pulse">connecting…</span>
 </header>
 
 <main>
   <div class="stats" id="stats"></div>
 
   <section>
-    <h2>Antrian persetujuan <span class="count" id="aprCount"></span></h2>
+    <h2>Approval queue <span class="count" id="aprCount"></span></h2>
     <div class="scroll"><table>
-      <thead><tr><th>Waktu</th><th>Run</th><th>Tool</th><th>Alasan</th><th>Argumen</th><th></th></tr></thead>
+      <thead><tr><th>Time</th><th>Run</th><th>Tool</th><th>Reason</th><th>Arguments</th><th></th></tr></thead>
       <tbody id="approvals"></tbody>
     </table></div>
-    <div class="empty" id="aprEmpty">Tidak ada yang menunggu persetujuan.</div>
+    <div class="empty" id="aprEmpty">Nothing waiting for approval.</div>
   </section>
 
   <section>
-    <h2>Run berjalan <span class="count" id="runCount"></span></h2>
+    <h2>Runs <span class="count" id="runCount"></span></h2>
     <div class="scroll"><table>
-      <thead><tr><th>Run</th><th>Status</th><th>Biaya</th><th>Token</th><th>Step</th><th>Verdict</th><th>Mulai</th></tr></thead>
+      <thead><tr><th>Run</th><th>Status</th><th>Cost</th><th>Tokens</th><th>Steps</th><th>Verdict</th><th>Started</th></tr></thead>
       <tbody id="runs"></tbody>
     </table></div>
-    <div class="empty" id="runEmpty">Belum ada run.</div>
+    <div class="empty" id="runEmpty">No runs yet.</div>
   </section>
 
   <section>
-    <h2>Event diblokir / ditanyakan</h2>
+    <h2>Blocked & asked events</h2>
     <div class="scroll"><table>
-      <thead><tr><th>Waktu</th><th>Efek</th><th>Run</th><th>Policy</th><th>Alasan</th></tr></thead>
+      <thead><tr><th>Time</th><th>Effect</th><th>Run</th><th>Policy</th><th>Reason</th></tr></thead>
       <tbody id="events"></tbody>
     </table></div>
-    <div class="empty" id="evEmpty">Belum ada event.</div>
+    <div class="empty" id="evEmpty">No events yet.</div>
   </section>
 
   <section>
     <h2>Policy</h2>
     <form class="policy" id="policyForm">
-      <label>Nama<input name="name" placeholder="cost cap $2/run" required /></label>
-      <label>Tipe<select name="type">
+      <label>Name<input name="name" placeholder="cost cap $2/run" required /></label>
+      <label>Type<select name="type">
         <option>cost_cap</option><option>loop_detect</option><option>step_limit</option>
         <option>rate_limit</option><option>time_limit</option><option>tool_permission</option>
       </select></label>
@@ -100,11 +100,11 @@
         <option>deny</option><option>ask</option><option>throttle</option><option>allow</option>
       </select></label>
       <label>Params (JSON)<textarea name="params" spellcheck="false">{"maxUsd": 2}</textarea></label>
-      <button type="submit" class="ok">Tambah policy</button>
+      <button type="submit" class="ok">Add policy</button>
     </form>
     <div class="err" id="policyErr"></div>
     <div class="scroll"><table>
-      <thead><tr><th>Nama</th><th>Tipe</th><th>Params</th><th>Action</th><th>Aktif</th><th></th></tr></thead>
+      <thead><tr><th>Name</th><th>Type</th><th>Params</th><th>Action</th><th>Enabled</th><th></th></tr></thead>
       <tbody id="policies"></tbody>
     </table></div>
   </section>
@@ -116,7 +116,7 @@ const H = { "x-curb-key": KEY, "content-type": "application/json" };
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const usd = (n) => "$" + Number(n || 0).toFixed(4);
-const time = (ts) => ts ? new Date(ts).toLocaleTimeString("id-ID") : "—";
+const time = (ts) => ts ? new Date(ts).toLocaleTimeString("en-US") : "—";
 
 async function api(path, opts = {}) {
   const res = await fetch(path, { headers: H, ...opts });
@@ -126,16 +126,16 @@ async function api(path, opts = {}) {
 
 function renderStats(s) {
   const cards = [
-    ["Run", s.runs], ["Berjalan", s.running], ["Diblokir", s.blocked],
-    ["Total biaya", usd(s.totalCostUsd)], ["Token", (s.totalTokens || 0).toLocaleString("id-ID")],
-    ["Ditolak policy", s.denied], ["Menunggu approval", s.pendingApprovals],
+    ["Runs", s.runs], ["Running", s.running], ["Blocked", s.blocked],
+    ["Total cost", usd(s.totalCostUsd)], ["Tokens", (s.totalTokens || 0).toLocaleString("en-US")],
+    ["Denied", s.denied], ["Pending approvals", s.pendingApprovals],
   ];
   $("stats").innerHTML = cards.map(([k, v]) => `<div class="stat"><b>${esc(v)}</b><span>${k}</span></div>`).join("");
 }
 
 function renderApprovals(list) {
   const pending = list.filter((a) => a.status === "pending");
-  $("aprCount").textContent = pending.length ? `${pending.length} menunggu` : "";
+  $("aprCount").textContent = pending.length ? `${pending.length} waiting` : "";
   $("aprEmpty").style.display = pending.length ? "none" : "block";
   $("approvals").innerHTML = pending.map((a) => `
     <tr>
@@ -152,14 +152,14 @@ function renderApprovals(list) {
 }
 
 function renderRuns(runs) {
-  $("runCount").textContent = runs.length ? `${runs.length} terakhir` : "";
+  $("runCount").textContent = runs.length ? `${runs.length} recent` : "";
   $("runEmpty").style.display = runs.length ? "none" : "block";
   $("runs").innerHTML = runs.map((r) => `
     <tr>
       <td class="mono">${esc((r.id || "").slice(0, 16))}</td>
       <td><span class="tag ${r.status === "blocked" ? "DENY" : "ALLOW"}">${esc(r.status)}</span></td>
       <td>${usd(r.totalCostUsd)}</td>
-      <td>${(r.totalTokens || 0).toLocaleString("id-ID")}</td>
+      <td>${(r.totalTokens || 0).toLocaleString("en-US")}</td>
       <td>${r.stepCount || 0}</td>
       <td class="mono">${esc(r.verdict || "—")}</td>
       <td>${time(r.startedAt)}</td>
@@ -186,10 +186,10 @@ function renderPolicies(list) {
       <td class="mono">${esc(p.type)}</td>
       <td class="mono wrap">${esc(JSON.stringify(p.params))}</td>
       <td>${esc(p.action)}</td>
-      <td>${p.enabled ? "ya" : "tidak"}</td>
+      <td>${p.enabled ? "yes" : "no"}</td>
       <td>
-        <button data-toggle="${esc(p.id)}" data-enabled="${p.enabled}">${p.enabled ? "Matikan" : "Nyalakan"}</button>
-        <button class="no" data-del="${esc(p.id)}">Hapus</button>
+        <button data-toggle="${esc(p.id)}" data-enabled="${p.enabled}">${p.enabled ? "Disable" : "Enable"}</button>
+        <button class="no" data-del="${esc(p.id)}">Delete</button>
       </td>
     </tr>`).join("");
 }
@@ -202,9 +202,9 @@ async function refresh() {
     ]);
     renderStats(stats); renderApprovals(approvals); renderRuns(runs);
     renderEvents(events); renderPolicies(policies);
-    $("pulse").textContent = "tersambung · " + new Date().toLocaleTimeString("id-ID");
+    $("pulse").textContent = "connected · " + new Date().toLocaleTimeString("en-US");
   } catch (err) {
-    $("pulse").textContent = "gagal memuat: " + err.message;
+    $("pulse").textContent = "failed to load: " + err.message;
   }
 }
 
@@ -227,7 +227,7 @@ document.addEventListener("click", async (ev) => {
     } else return;
     await refresh();
   } catch (err) {
-    $("pulse").textContent = "aksi gagal: " + err.message;
+    $("pulse").textContent = "action failed: " + err.message;
   }
 });
 
@@ -246,7 +246,7 @@ $("policyForm").addEventListener("submit", async (ev) => {
     ev.target.reset();
     await refresh();
   } catch (err) {
-    $("policyErr").textContent = "Gagal menyimpan policy: " + err.message;
+    $("policyErr").textContent = "Failed to save policy: " + err.message;
   }
 });
 

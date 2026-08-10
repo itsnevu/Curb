@@ -17,8 +17,8 @@ export const toolPermission: PolicyEvaluator = (ctx, policy) => {
   if (!matchByName && !matchBySens) return { effect: "ALLOW" };
 
   if (mode === "deny")
-    return { effect: "DENY", policyId: policy.id, reason: `tool_permission: '${ctx.toolName}' diblokir` };
+    return { effect: "DENY", policyId: policy.id, reason: `tool_permission: '${ctx.toolName}' is blocked` };
   if (mode === "ask")
-    return { effect: "ASK", policyId: policy.id, reason: `tool_permission: '${ctx.toolName}' butuh persetujuan` };
+    return { effect: "ASK", policyId: policy.id, reason: `tool_permission: '${ctx.toolName}' requires approval` };
   return { effect: "ALLOW" };
 };

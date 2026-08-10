@@ -17,13 +17,13 @@ export function digestArgs(args: unknown, depth = 0): Record<string, unknown> {
 }
 
 function redact(value: unknown, depth: number): unknown {
-  if (depth > 4) return "[terlalu dalam]";
+  if (depth > 4) return "[too deep]";
   if (value === null || value === undefined) return value;
   if (typeof value === "string") return truncate(value);
   if (typeof value === "number" || typeof value === "boolean") return value;
   if (Array.isArray(value)) {
     const head = value.slice(0, 10).map((v) => redact(v, depth + 1));
-    return value.length > 10 ? [...head, `…+${value.length - 10} lagi`] : head;
+    return value.length > 10 ? [...head, `…+${value.length - 10} more`] : head;
   }
   if (typeof value === "object") {
     return Object.fromEntries(

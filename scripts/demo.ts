@@ -49,7 +49,7 @@ async function main() {
   await policy({ name: "cost cap $0.03/run", type: "cost_cap", action: "deny", params: { maxUsd: 0.03 } });
   await policy({ name: "loop detect", type: "loop_detect", action: "deny", params: { maxRepeats: 3 } });
   await policy({
-    name: "hapus file butuh izin", type: "tool_permission", action: "ask",
+    name: "delete_file requires approval", type: "tool_permission", action: "ask",
     params: { tools: ["delete_file"], mode: "ask" },
   });
 
@@ -59,7 +59,7 @@ async function main() {
       headers: { "content-type": "application/json", "x-curb-key": KEY },
       body: JSON.stringify({ scope: {}, enabled: true, ...p }),
     });
-    if (!res.ok) throw new Error(`gagal bikin policy: ${await res.text()}`);
+    if (!res.ok) throw new Error(`failed to create policy: ${await res.text()}`);
   }
 
   const llm = async (runId: string, isi: string) => {
@@ -72,45 +72,45 @@ async function main() {
   };
 
   // ── A. Cost cap ────────────────────────────────────────────────────────
-  c.judul("A. Ledakan biaya — agent dihentikan saat melewati $0.03");
+  c.judul("A. Cost blowup — agent halted after passing $0.03");
   for (let i = 1; i <= 5; i++) {
     const r = await llm("demo-cost", `analisis bagian ${i}`);
-    if (r.status === 200) c.ok(`call ${i} lewat — biaya kumulatif $${r.cost}`);
+    if (r.status === 200) c.ok(`call ${i} passed — cumulative cost $${r.cost}`);
     else {
-      c.blok(`call ${i} DITOLAK — ${r.body.error.message}`);
+      c.blok(`call ${i} BLOCKED — ${r.body.error.message}`);
       break;
     }
   }
 
   // ── B. Loop breaker ────────────────────────────────────────────────────
-  c.judul("B. Loop tak terbatas — pesan identik berulang terdeteksi");
+  c.judul("B. Infinite loop — identical repeated messages detected");
   for (let i = 1; i <= 5; i++) {
     const r = await llm("demo-loop", "pertanyaan yang sama persis");
-    if (r.status === 200) c.ok(`call ${i} lewat (pesan identik)`);
+    if (r.status === 200) c.ok(`call ${i} passed (identical message)`);
     else {
-      c.blok(`call ${i} DITOLAK — ${r.body.error.message}`);
+      c.blok(`call ${i} BLOCKED — ${r.body.error.message}`);
       break;
     }
   }
 
   // ── C. Ask-before-acting ───────────────────────────────────────────────
-  c.judul("C. Aksi berbahaya — ditahan sampai manusia memutuskan");
+  c.judul("C. Dangerous action — held until a human decides");
   const curb = new Curb({ baseUrl: cpUrl, apiKey: KEY, approvalTimeoutMs: 15_000 });
   const terhapus: string[] = [];
   const deleteFile = curb.wrapTool(
     async (path: string) => {
       terhapus.push(path);
-      return `terhapus: ${path}`;
+      return `deleted: ${path}`;
     },
     { name: "delete_file", sensitivity: "high" },
   );
 
-  const agent = curb.run(async () => deleteFile("/data/produksi.db"), "demo-approval");
+  const agent = curb.run(async () => deleteFile("/data/production.db"), "demo-approval");
   await tunggu(() => antrian(cpUrl).then((q) => q.length > 0));
   const [menunggu] = await antrian(cpUrl);
-  c.tanya(`agent minta izin menjalankan '${menunggu.toolName}' — eksekusi DITAHAN`);
-  c.info(`file belum tersentuh: ${JSON.stringify(terhapus)}`);
-  c.info(`(di dunia nyata, operator klik Approve/Deny di ${cpUrl})`);
+  c.tanya(`agent requests permission to run '${menunggu.toolName}' — execution HELD`);
+  c.info(`nothing touched yet: ${JSON.stringify(terhapus)}`);
+  c.info(`(in the real world an operator clicks Approve/Deny at ${cpUrl})`);
 
   await new Promise((r) => setTimeout(r, 800));
   await fetch(`${cpUrl}/v1/approvals/${menunggu.id}/decide`, {
@@ -118,10 +118,10 @@ async function main() {
     headers: { "content-type": "application/json", "x-curb-key": KEY },
     body: JSON.stringify({ approve: true, by: "operator-demo" }),
   });
-  c.ok(`disetujui operator → ${await agent}`);
+  c.ok(`approved by operator → ${await agent}`);
 
   // ── C2. Penolakan ──────────────────────────────────────────────────────
-  const ditolak = curb.run(async () => deleteFile("/data/lebih-penting.db"), "demo-deny").catch((e) => e);
+  const ditolak = curb.run(async () => deleteFile("/data/even-more-important.db"), "demo-deny").catch((e) => e);
   await tunggu(() => antrian(cpUrl).then((q) => q.length > 0));
   const [kedua] = await antrian(cpUrl);
   await fetch(`${cpUrl}/v1/approvals/${kedua.id}/decide`, {
@@ -130,19 +130,19 @@ async function main() {
     body: JSON.stringify({ approve: false, by: "operator-demo" }),
   });
   const err = await ditolak;
-  c.blok(`ditolak operator → ${err instanceof PolicyViolation ? err.message : err}`);
-  c.info(`file yang benar-benar terhapus: ${JSON.stringify(terhapus)}`);
+  c.blok(`denied by operator → ${err instanceof PolicyViolation ? err.message : err}`);
+  c.info(`actually deleted: ${JSON.stringify(terhapus)}`);
 
   await audit.flush(); // pastikan event gateway sudah sampai sebelum kita membaca statistik
 
   // ── Ringkasan ──────────────────────────────────────────────────────────
   const stats = await (await fetch(`${cpUrl}/v1/stats`, { headers: { "x-curb-key": KEY } })).json() as any;
-  c.judul("Ringkasan yang tercatat di control plane");
+  c.judul("Recorded in the control plane");
   console.log(
-    `  run: ${stats.runs} · diblokir: ${stats.blocked} · keputusan DENY: ${stats.denied} · ` +
-      `minta izin: ${stats.asked} · total biaya: $${stats.totalCostUsd.toFixed(4)}`,
+    `  runs: ${stats.runs} · blocked: ${stats.blocked} · DENY decisions: ${stats.denied} · ` +
+      `approvals asked: ${stats.asked} · total cost: $${stats.totalCostUsd.toFixed(4)}`,
   );
-  console.log(`\n  Dashboard live: \x1b[4m${cpUrl}\x1b[0m  (Ctrl+C untuk berhenti)\n`);
+  console.log(`\n  Live dashboard: \x1b[4m${cpUrl}\x1b[0m  (Ctrl+C to stop)\n`);
 
   if (process.env.CURB_DEMO_EXIT === "1") {
     await Promise.all([gw.close(), cp.close(), provider.close()]);
@@ -161,7 +161,7 @@ async function tunggu(cond: () => Promise<boolean>, timeoutMs = 5_000) {
     if (await cond()) return;
     await new Promise((r) => setTimeout(r, 25));
   }
-  throw new Error("timeout menunggu kondisi");
+  throw new Error("timed out waiting for condition");
 }
 
 function addrOf(addr: ReturnType<import("node:net").Server["address"]>) {
@@ -169,6 +169,6 @@ function addrOf(addr: ReturnType<import("node:net").Server["address"]>) {
 }
 
 main().catch((err) => {
-  console.error("\ndemo gagal:", err);
+  console.error("\ndemo failed:", err);
   process.exit(1);
 });

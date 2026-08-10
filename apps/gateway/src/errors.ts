@@ -14,7 +14,7 @@ export function statusForDecision(decision: Decision, policyType?: string): numb
  * memunculkannya sebagai error normal, bukan crash parsing.
  */
 export function errorBody(provider: Provider, decision: Decision) {
-  const message = `Curb policy: ${decision.reason ?? "request diblokir"}`;
+  const message = `Curb policy: ${decision.reason ?? "request blocked"}`;
   if (provider === "anthropic") {
     return {
       type: "error",

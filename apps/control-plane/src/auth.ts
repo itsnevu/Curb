@@ -36,11 +36,11 @@ export function makeAuth(repo: Repo) {
   return async function authenticate(req: FastifyRequest, reply: FastifyReply) {
     const key = apiKeyOf(req);
     if (!key) {
-      return reply.code(401).send({ error: { message: "x-curb-key tidak ada", type: "unauthorized" } });
+      return reply.code(401).send({ error: { message: "missing x-curb-key", type: "unauthorized" } });
     }
     const project = await repo.projectByApiKeyHash(hashApiKey(key));
     if (!project) {
-      return reply.code(401).send({ error: { message: "api key tidak dikenal", type: "unauthorized" } });
+      return reply.code(401).send({ error: { message: "unknown api key", type: "unauthorized" } });
     }
     req.project = project;
   };

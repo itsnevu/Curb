@@ -187,7 +187,7 @@ def test_fail_closed_saat_control_plane_mati():
     dipanggil = []
     with pytest.raises(PolicyViolation) as err:
         curb.wrap_tool(lambda: dipanggil.append(1), name="t")()
-    assert "tidak terjangkau" in str(err.value)
+    assert "unreachable" in str(err.value)
     assert dipanggil == []
 
 

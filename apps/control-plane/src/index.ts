@@ -22,7 +22,7 @@ const app = buildApp({
   failMode: process.env.CURB_FAIL_MODE === "open" ? "open" : "closed",
   logger: true,
   dashboardApiKey: process.env.CURB_API_KEY,
-  notifier: notifierFromEnv({ onError: (err) => app.log.warn({ err }, "alert gagal terkirim") }),
+  notifier: notifierFromEnv({ onError: (err) => app.log.warn({ err }, "alert delivery failed") }),
 });
 
 const port = Number(process.env.CONTROL_PLANE_PORT ?? 8090);
@@ -33,12 +33,12 @@ async function main() {
   await app.listen({ port, host: "0.0.0.0" });
   app.log.info(
     { port, db: process.env.DATABASE_URL ? "postgres" : "memory", state: process.env.REDIS_URL ? "redis" : "memory" },
-    "curb control-plane siap",
+    "curb control-plane ready",
   );
 }
 
 main().catch((err) => {
-  app.log.error({ err }, "control-plane gagal start");
+  app.log.error({ err }, "control-plane failed to start");
   process.exit(1);
 });
 

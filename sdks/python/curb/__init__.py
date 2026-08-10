@@ -66,7 +66,7 @@ class Curb:
             _run_id.reset(token)
 
     def run_id(self) -> str:
-        return current_run_id() or self._run_id or "run-tanpa-konteks"
+        return current_run_id() or self._run_id or "run-without-context"
 
     def gateway_headers(self) -> Dict[str, str]:
         """Tempelkan ke klien LLM supaya cost/loop ikut terjaring gateway."""
@@ -137,11 +137,11 @@ class Curb:
             # Control plane tak terjangkau = kita tidak tahu apakah aksi ini aman.
             # Default fail-closed: lebih baik agent berhenti daripada bertindak buta.
             if self.fail_mode == "open":
-                return {"effect": "ALLOW", "reason": f"curb tidak terjangkau (fail-open): {err}"}
+                return {"effect": "ALLOW", "reason": f"curb unreachable (fail-open): {err}"}
             return {
                 "effect": "DENY",
                 "policyId": "curb_unreachable",
-                "reason": f"curb tidak terjangkau (fail-closed): {err}",
+                "reason": f"curb unreachable (fail-closed): {err}",
             }
         if self.on_decision:
             self.on_decision(decision, full)
@@ -166,7 +166,7 @@ class Curb:
         approval_id = decision.get("approvalId")
         if not approval_id:
             raise PolicyViolation(
-                {**decision, "effect": "DENY", "reason": "ASK tanpa approvalId — control plane tidak konsisten"},
+                {**decision, "effect": "DENY", "reason": "ASK without approvalId — inconsistent control plane"},
                 tool_name,
             )
         self._await_approval(approval_id, tool_name, approval_timeout_s)
@@ -199,7 +199,7 @@ class Curb:
                     {
                         "effect": "DENY",
                         "policyId": "curb_approval_denied",
-                        "reason": f"approval ditolak{f' oleh {by}' if by else ''}",
+                        "reason": f"approval denied{f' by {by}' if by else ''}",
                     },
                     tool_name,
                 )

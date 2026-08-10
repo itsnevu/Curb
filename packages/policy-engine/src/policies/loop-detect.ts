@@ -23,7 +23,7 @@ export const loopDetect: PolicyEvaluator = (_ctx, policy, state) => {
       return {
         effect: "DENY",
         policyId: policy.id,
-        reason: `loop_detect: pesan identik berulang ${repeats}x (batas ${maxRepeats})`,
+        reason: `loop_detect: identical message repeated ${repeats}x (limit ${maxRepeats})`,
       };
     }
   }
@@ -33,7 +33,7 @@ export const loopDetect: PolicyEvaluator = (_ctx, policy, state) => {
     return {
       effect: "DENY",
       policyId: policy.id,
-      reason: `loop_detect: siklus tool berulang terdeteksi (${state.toolWindow.slice(-6).join("→")})`,
+      reason: `loop_detect: repeating tool cycle detected (${state.toolWindow.slice(-6).join("→")})`,
     };
   }
 

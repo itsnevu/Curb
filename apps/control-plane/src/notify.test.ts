@@ -29,7 +29,7 @@ describe("HttpNotifier", () => {
 
     expect(s.calls.map((c) => c.url)).toEqual(["http://wh", "http://slack"]);
     expect(s.calls[0].body).toMatchObject({ type: "policy_tripped", runId: "r1", policyId: "cc" });
-    expect(String(s.calls[1].body.text)).toContain("memblokir");
+    expect(String(s.calls[1].body.text)).toContain("blocked");
   });
 
   it("event ALLOW tidak memicu alert", async () => {

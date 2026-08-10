@@ -11,7 +11,7 @@ export const stepLimit: PolicyEvaluator = (_ctx, policy, state) => {
     return {
       effect: "DENY",
       policyId: policy.id,
-      reason: `step_limit: run mencapai ${state.stepCount} step (batas ${maxSteps})`,
+      reason: `step_limit: run reached ${state.stepCount} steps (limit ${maxSteps})`,
     };
   }
   return { effect: "ALLOW" };

@@ -55,7 +55,7 @@ export class Curb {
 
   /** runId aktif — dipakai untuk mengoper ke gateway lewat header X-Curb-Run-Id. */
   runId(): string {
-    return currentRunId() ?? this.opts.runId ?? "run-tanpa-konteks";
+    return currentRunId() ?? this.opts.runId ?? "run-without-context";
   }
 
   /** Header yang perlu ditempel ke klien LLM supaya cost/loop ikut terjaring gateway. */
@@ -120,12 +120,12 @@ export class Curb {
       // why: control plane tak terjangkau = kita tidak tahu apakah aksi ini aman.
       // Default fail-closed: lebih baik agent berhenti daripada bertindak buta.
       if (this.opts.failMode === "open") {
-        return { effect: "ALLOW", reason: `curb tidak terjangkau (fail-open): ${(err as Error).message}` };
+        return { effect: "ALLOW", reason: `curb unreachable (fail-open): ${(err as Error).message}` };
       }
       return {
         effect: "DENY",
         policyId: "curb_unreachable",
-        reason: `curb tidak terjangkau (fail-closed): ${(err as Error).message}`,
+        reason: `curb unreachable (fail-closed): ${(err as Error).message}`,
       };
     }
   }
@@ -140,7 +140,7 @@ export class Curb {
 
     if (!decision.approvalId) {
       throw new PolicyViolation(
-        { ...decision, effect: "DENY", reason: "ASK tanpa approvalId — control plane tidak konsisten" },
+        { ...decision, effect: "DENY", reason: "ASK without approvalId — inconsistent control plane" },
         meta?.name,
       );
     }
@@ -169,7 +169,7 @@ export class Curb {
           {
             effect: "DENY",
             policyId: "curb_approval_denied",
-            reason: `approval ditolak${view.decidedBy ? ` oleh ${view.decidedBy}` : ""}`,
+            reason: `approval denied${view.decidedBy ? ` by ${view.decidedBy}` : ""}`,
           },
           meta?.name,
         );

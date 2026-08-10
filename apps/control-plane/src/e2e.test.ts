@@ -44,7 +44,7 @@ const decide = (id: string, approve: boolean) =>
 describe("agent + SDK + control plane, end-to-end", () => {
   it("tool sensitif ASK → menunggu → jalan setelah di-approve dari dashboard", async () => {
     await addPolicy({
-      name: "hapus file butuh izin", type: "tool_permission", action: "ask",
+      name: "delete_file requires approval", type: "tool_permission", action: "ask",
       params: { tools: ["delete_file"], mode: "ask" },
     });
 
@@ -73,7 +73,7 @@ describe("agent + SDK + control plane, end-to-end", () => {
 
   it("deny dari dashboard → agent dapat PolicyViolation, tool tidak pernah jalan", async () => {
     await addPolicy({
-      name: "hapus file butuh izin", type: "tool_permission", action: "ask",
+      name: "delete_file requires approval", type: "tool_permission", action: "ask",
       params: { tools: ["delete_file"], mode: "ask" },
     });
 
@@ -94,7 +94,7 @@ describe("agent + SDK + control plane, end-to-end", () => {
 
   it("policy mode deny langsung melempar tanpa approval", async () => {
     await addPolicy({
-      name: "jangan sentuh db", type: "tool_permission", action: "deny",
+      name: "never touch the db", type: "tool_permission", action: "deny",
       params: { tools: ["wipe_db"], mode: "deny" },
     });
     const wipe = curb.wrapTool(async () => "boom", { name: "wipe_db" });
@@ -103,7 +103,7 @@ describe("agent + SDK + control plane, end-to-end", () => {
   });
 
   it("step_limit menghentikan agent yang berputar", async () => {
-    await addPolicy({ name: "maks 3 step", type: "step_limit", action: "deny", params: { maxSteps: 3 } });
+    await addPolicy({ name: "max 3 steps", type: "step_limit", action: "deny", params: { maxSteps: 3 } });
 
     let langkah = 0;
     const jalan = curb.run(async () => {
@@ -118,7 +118,7 @@ describe("agent + SDK + control plane, end-to-end", () => {
   });
 
   it("semua keputusan terekam di audit log", async () => {
-    await addPolicy({ name: "maks 1 step", type: "step_limit", action: "deny", params: { maxSteps: 1 } });
+    await addPolicy({ name: "max 1 step", type: "step_limit", action: "deny", params: { maxSteps: 1 } });
     await curb.run(async () => {
       await curb.step();
       await curb.step().catch(() => {});

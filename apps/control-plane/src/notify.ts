@@ -32,19 +32,19 @@ export class HttpNotifier implements Notifier {
     // why: satu run yang nyangkut bisa memicu ratusan DENY — jangan banjiri Slack.
     if (!this.allow(`${event.runId}:${event.policyId}`)) return;
 
-    const title = event.effect === "DENY" ? "🛑 Curb memblokir run" : "🐢 Curb menahan run";
+    const title = event.effect === "DENY" ? "🛑 Curb blocked a run" : "🐢 Curb throttled a run";
     this.send(
       { type: "policy_tripped", ...event },
-      `${title}\n*run:* \`${event.runId}\`\n*policy:* \`${event.policyId ?? "?"}\`\n*alasan:* ${event.reason ?? "-"}`,
+      `${title}\n*run:* \`${event.runId}\`\n*policy:* \`${event.policyId ?? "?"}\`\n*reason:* ${event.reason ?? "-"}`,
     );
   }
 
   approvalRequested(approval: Approval, dashboardUrl = this.opts.dashboardUrl): void {
     if (!this.allow(`apr:${approval.id}`)) return;
-    const link = dashboardUrl ? `\n<${dashboardUrl}|Buka dashboard untuk memutuskan>` : "";
+    const link = dashboardUrl ? `\n<${dashboardUrl}|Open the dashboard to decide>` : "";
     this.send(
       { type: "approval_requested", ...approval, dashboardUrl },
-      `✋ *${approval.toolName}* menunggu persetujuan\n*run:* \`${approval.runId}\`\n*alasan:* ${approval.reason ?? "-"}${link}`,
+      `✋ *${approval.toolName}* is waiting for approval\n*run:* \`${approval.runId}\`\n*reason:* ${approval.reason ?? "-"}${link}`,
     );
   }
 

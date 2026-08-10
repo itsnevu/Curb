@@ -26,7 +26,7 @@ export function registerObservability(app: FastifyInstance, repo: Repo, notifier
   app.post("/v1/events", async (req, reply) => {
     const parsed = IngestSchema.safeParse(req.body);
     if (!parsed.success) {
-      return reply.code(400).send({ error: { message: "batch event tidak valid" } });
+      return reply.code(400).send({ error: { message: "invalid event batch" } });
     }
     const projectId = req.project!.id;
     const events = parsed.data.events;
@@ -51,7 +51,7 @@ export function registerObservability(app: FastifyInstance, repo: Repo, notifier
     }
 
     if (parsed.data.dropped) {
-      req.log.warn({ dropped: parsed.data.dropped }, "gateway membuang event audit");
+      req.log.warn({ dropped: parsed.data.dropped }, "gateway dropped audit events");
     }
     return { ok: true, accepted: events.length };
   });
@@ -64,7 +64,7 @@ export function registerObservability(app: FastifyInstance, repo: Repo, notifier
   app.get("/v1/runs/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
     const run = await repo.getRun(req.project!.id, id);
-    if (!run) return reply.code(404).send({ error: { message: "run tidak ditemukan" } });
+    if (!run) return reply.code(404).send({ error: { message: "run not found" } });
     return { ...run, events: await repo.listEvents(req.project!.id, { runId: id, limit: 200 }) };
   });
 

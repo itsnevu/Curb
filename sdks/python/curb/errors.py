@@ -11,7 +11,7 @@ class PolicyViolation(Exception):
         self.decision = decision
         self.policy_id = decision.get("policyId")
         self.tool_name = tool_name
-        super().__init__(decision.get("reason") or "aksi ditolak oleh policy Curb")
+        super().__init__(decision.get("reason") or "action denied by Curb policy")
 
 
 class ApprovalTimeout(PolicyViolation):
@@ -22,7 +22,7 @@ class ApprovalTimeout(PolicyViolation):
             {
                 "effect": "DENY",
                 "policyId": "curb_approval_timeout",
-                "reason": f"approval {approval_id} tidak diputuskan dalam {waited_ms}ms",
+                "reason": f"approval {approval_id} was not decided within {waited_ms}ms",
             },
             tool_name,
         )

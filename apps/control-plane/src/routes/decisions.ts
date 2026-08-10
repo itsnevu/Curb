@@ -30,7 +30,7 @@ export function registerDecisions(app: FastifyInstance, deps: DecisionDeps) {
   app.post("/v1/decisions", async (req, reply) => {
     const parsed = DecisionRequestSchema.safeParse(req.body);
     if (!parsed.success) {
-      return reply.code(400).send({ error: { message: "body tidak valid", details: parsed.error.format() } });
+      return reply.code(400).send({ error: { message: "invalid request body", details: parsed.error.format() } });
     }
     const projectId = req.project!.id;
     const input = parsed.data;
@@ -52,11 +52,11 @@ export function registerDecisions(app: FastifyInstance, deps: DecisionDeps) {
     try {
       decision = evaluate(ctx, await deps.repo.listPolicies(projectId), state);
     } catch (err) {
-      req.log.error({ err }, "evaluasi policy gagal");
+      req.log.error({ err }, "policy evaluation failed");
       decision =
         deps.failMode === "open"
-          ? { effect: "ALLOW", reason: "engine tidak tersedia (fail-open)" }
-          : { effect: "DENY", policyId: "curb_fail_closed", reason: "policy engine tidak tersedia (fail-closed)" };
+          ? { effect: "ALLOW", reason: "policy engine unavailable (fail-open)" }
+          : { effect: "DENY", policyId: "curb_fail_closed", reason: "policy engine unavailable (fail-closed)" };
     }
 
     let approvalId: string | undefined;

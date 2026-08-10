@@ -18,13 +18,13 @@ export function registerPolicies(app: FastifyInstance, repo: Repo) {
   app.get("/v1/policies/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
     const p = await repo.getPolicy(req.project!.id, id);
-    return p ?? reply.code(404).send({ error: { message: "policy tidak ditemukan" } });
+    return p ?? reply.code(404).send({ error: { message: "policy not found" } });
   });
 
   app.post("/v1/policies", async (req, reply) => {
     const parsed = CreateSchema.safeParse(req.body);
     if (!parsed.success) {
-      return reply.code(400).send({ error: { message: "policy tidak valid", details: parsed.error.format() } });
+      return reply.code(400).send({ error: { message: "invalid policy", details: parsed.error.format() } });
     }
     const policy = { ...parsed.data, id: parsed.data.id ?? `pol_${randomUUID().slice(0, 8)}` };
     const validated = PolicySchema.parse(policy);
@@ -35,10 +35,10 @@ export function registerPolicies(app: FastifyInstance, repo: Repo) {
   app.put("/v1/policies/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
     const existing = await repo.getPolicy(req.project!.id, id);
-    if (!existing) return reply.code(404).send({ error: { message: "policy tidak ditemukan" } });
+    if (!existing) return reply.code(404).send({ error: { message: "policy not found" } });
     const parsed = PolicySchema.safeParse({ ...existing, ...(req.body as object), id });
     if (!parsed.success) {
-      return reply.code(400).send({ error: { message: "policy tidak valid", details: parsed.error.format() } });
+      return reply.code(400).send({ error: { message: "invalid policy", details: parsed.error.format() } });
     }
     await repo.putPolicy(req.project!.id, parsed.data);
     return parsed.data;
@@ -47,6 +47,6 @@ export function registerPolicies(app: FastifyInstance, repo: Repo) {
   app.delete("/v1/policies/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
     const ok = await repo.deletePolicy(req.project!.id, id);
-    return ok ? { ok: true } : reply.code(404).send({ error: { message: "policy tidak ditemukan" } });
+    return ok ? { ok: true } : reply.code(404).send({ error: { message: "policy not found" } });
   });
 }

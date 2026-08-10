@@ -9,7 +9,7 @@ export const timeLimit: PolicyEvaluator = (ctx, policy, state) => {
     return {
       effect: "DENY",
       policyId: policy.id,
-      reason: `time_limit: run berjalan ${now - state.startedAt}ms (batas ${maxMs}ms)`,
+      reason: `time_limit: run has been going ${now - state.startedAt}ms (limit ${maxMs}ms)`,
     };
   }
   return { effect: "ALLOW" };

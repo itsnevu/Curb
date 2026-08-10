@@ -17,7 +17,7 @@ export const rateLimit: PolicyEvaluator = (ctx, policy, state) => {
     return {
       effect: "THROTTLE",
       policyId: policy.id,
-      reason: `rate_limit: ${recent.length} call / ${perMs}ms (batas ${maxCalls})`,
+      reason: `rate_limit: ${recent.length} calls / ${perMs}ms (limit ${maxCalls})`,
       retryAfterMs: perMs,
     };
   }
