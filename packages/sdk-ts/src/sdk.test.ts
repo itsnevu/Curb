@@ -57,8 +57,16 @@ describe("run() and runId propagation", () => {
     expect(server.seen[0].runId).toBe("run-mine");
   });
 
-  it("gatewayHeaders carries the active runId to the gateway", async () => {
+  it("gatewayHeaders carries the active runId and the key to the gateway", async () => {
     const curb = curbWith(fakeServer({ decision: { effect: "ALLOW" } }));
+    const headers = await curb.run(async () => curb.gatewayHeaders(), "run-x");
+    // why both: the run id groups the calls into one budget, and the gateway rejects
+    // calls with no key — headers that only carry the run id would 401.
+    expect(headers).toEqual({ "X-Curb-Run-Id": "run-x", "X-Curb-Key": "k" });
+  });
+
+  it("gatewayHeaders omits the key when there is none to send", async () => {
+    const curb = curbWith(fakeServer({ decision: { effect: "ALLOW" } }), { apiKey: "" });
     const headers = await curb.run(async () => curb.gatewayHeaders(), "run-x");
     expect(headers).toEqual({ "X-Curb-Run-Id": "run-x" });
   });

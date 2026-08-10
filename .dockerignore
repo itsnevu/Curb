@@ -1,0 +1,21 @@
+# Build context hygiene. Without this, `docker build` uploads every local
+# node_modules and .venv into the image — slow builds, and host-built native modules
+# that do not match the container's platform.
+node_modules
+**/node_modules
+dist
+**/dist
+.venv
+**/.venv
+__pycache__
+**/__pycache__
+.git
+.github
+*.log
+.env
+.DS_Store
+coverage
+dump.rdb
+sdks/python
+examples
+scripts/demo.sh

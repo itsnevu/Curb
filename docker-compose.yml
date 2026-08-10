@@ -24,10 +24,16 @@ services:
 
   control-plane:
     build: { context: ., dockerfile: apps/control-plane/Dockerfile }
-    env_file: .env
+    # `required: false` so `docker compose up` works before you have written a .env —
+    # the defaults below are enough to bring the stack up.
+    env_file:
+      - path: .env
+        required: false
     environment:
       DATABASE_URL: postgresql://curb:curb@postgres:5432/curb
       REDIS_URL: redis://redis:6379
+      CURB_API_KEY: ${CURB_API_KEY:-dev-key-change-me}
+      CURB_FAIL_MODE: ${CURB_FAIL_MODE:-closed}
     ports: ["8090:8090"]
     depends_on:
       postgres: { condition: service_healthy }
@@ -35,14 +41,20 @@ services:
 
   gateway:
     build: { context: ., dockerfile: apps/gateway/Dockerfile }
-    env_file: .env
+    env_file:
+      - path: .env
+        required: false
     environment:
       REDIS_URL: redis://redis:6379
       CONTROL_PLANE_URL: http://control-plane:8090
+      # The gateway refuses to start unauthenticated: this key is what your agents send
+      # as x-curb-key, and it decides which project their traffic belongs to.
+      CURB_API_KEY: ${CURB_API_KEY:-dev-key-change-me}
+      CURB_FAIL_MODE: ${CURB_FAIL_MODE:-closed}
     ports: ["8080:8080"]
     depends_on:
       redis: { condition: service_healthy }
-      control-plane: { condition: service_started }
+      control-plane: { condition: service_healthy }
 
 volumes:
   curb_pg:

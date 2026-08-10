@@ -6,6 +6,9 @@ const FORBIDDEN_POLICIES = ["tool_permission"];
 
 export function statusForDecision(decision: Decision, policyType?: string): number {
   if (decision.effect === "THROTTLE") return 429;
+  // ASK has no meaning on an LLM call: there is nobody to hold the HTTP request open for.
+  // The gateway refuses it and says so; ask-before-acting belongs to the SDK.
+  if (decision.effect === "ASK") return 403;
   return policyType && FORBIDDEN_POLICIES.includes(policyType) ? 403 : 429;
 }
 
@@ -14,7 +17,10 @@ export function statusForDecision(decision: Decision, policyType?: string): numb
  * surface it as a normal error instead of crashing while parsing.
  */
 export function errorBody(provider: Provider, decision: Decision) {
-  const message = `Curb policy: ${decision.reason ?? "request blocked"}`;
+  const message =
+    decision.effect === "ASK"
+      ? `Curb policy: ${decision.reason ?? "request blocked"} — approval cannot be requested for an LLM call; use the Curb SDK to gate the tool instead`
+      : `Curb policy: ${decision.reason ?? "request blocked"}`;
   if (provider === "anthropic") {
     return {
       type: "error",

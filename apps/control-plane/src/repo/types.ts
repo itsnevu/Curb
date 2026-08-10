@@ -36,6 +36,12 @@ export interface Approval {
   decidedBy?: string;
 }
 
+export interface DecideResult {
+  approval: Approval | null;
+  /** True only when THIS call moved the approval out of `pending`. */
+  changed: boolean;
+}
+
 export interface RunSummary {
   id: string;
   projectId: string;
@@ -70,7 +76,18 @@ export interface Repo {
   createApproval(a: Approval): Promise<Approval>;
   getApproval(id: string): Promise<Approval | null>;
   listApprovals(projectId: string, status?: ApprovalStatus): Promise<Approval[]>;
-  decideApproval(id: string, status: ApprovalStatus, by: string, at: number): Promise<Approval | null>;
+  /**
+   * Decide a pending approval. `changed` is false when it had already been decided —
+   * the caller must not emit a second audit event or wake waiters again for it.
+   */
+  decideApproval(
+    id: string,
+    status: ApprovalStatus,
+    by: string,
+    at: number,
+  ): Promise<DecideResult>;
+  /** Mark every approval still pending and requested before `before` as expired. */
+  expirePendingApprovals(before: number, at: number): Promise<Approval[]>;
 
   upsertRun(run: RunSummary): Promise<void>;
   listRuns(projectId: string, limit?: number): Promise<RunSummary[]>;

@@ -54,8 +54,18 @@ def test_run_id_can_be_supplied():
     assert seen[0]["runId"] == "run-mine"
 
 
-def test_gateway_headers_carry_run_id():
+def test_gateway_headers_carry_run_id_and_key():
+    # why both: the run id groups calls into one budget, and the gateway rejects calls
+    # that carry no key — run id alone would 401.
     curb, _ = make_curb({"effect": "ALLOW"})
+    curb.client.api_key = "k"
+    with curb.run("run-x"):
+        assert curb.gateway_headers() == {"X-Curb-Run-Id": "run-x", "X-Curb-Key": "k"}
+
+
+def test_gateway_headers_omit_key_when_absent():
+    curb, _ = make_curb({"effect": "ALLOW"})
+    curb.client.api_key = ""
     with curb.run("run-x"):
         assert curb.gateway_headers() == {"X-Curb-Run-Id": "run-x"}
 

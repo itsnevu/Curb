@@ -66,6 +66,27 @@ export function isStreaming(body: Record<string, unknown> | undefined): boolean 
   return body?.stream === true;
 }
 
+/** Rough token count from raw text. ~4 characters per token holds well enough for both providers. */
+export function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 4);
+}
+
+/**
+ * Worst-case usage for a request we have not sent yet, used to price it BEFORE
+ * forwarding. Deliberately pessimistic: the prompt is measured for real, and the
+ * completion is assumed to run to `max_tokens`. A cap that under-estimates is not a cap,
+ * so when `max_tokens` is absent we assume a large-but-plausible completion.
+ */
+const ASSUMED_MAX_COMPLETION = 4096;
+
+export function estimateUsage(body: Record<string, unknown> | undefined): Usage {
+  if (!body) return ZERO_USAGE;
+  const prompt = estimateTokens(JSON.stringify(messagesOf(body) ?? []));
+  const asked = Number(body.max_tokens ?? body.max_completion_tokens ?? body.max_output_tokens);
+  const completion = Number.isFinite(asked) && asked > 0 ? asked : ASSUMED_MAX_COMPLETION;
+  return { promptTokens: prompt, completionTokens: completion, totalTokens: prompt + completion };
+}
+
 /**
  * Accumulates usage from an SSE stream. Providers send usage in the final chunks:
  * - OpenAI: a chunk carrying `usage` (requires stream_options.include_usage)

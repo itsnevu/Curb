@@ -8,6 +8,14 @@ import { MemoryRepo } from "./repo/memory.js";
 import { PostgresRepo } from "./repo/postgres.js";
 import type { Repo } from "./repo/types.js";
 
+/** Reads a numeric env var, falling back when it is unset or not a number. */
+function numberFromEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+
 const repo: Repo = process.env.DATABASE_URL
   ? new PostgresRepo(process.env.DATABASE_URL)
   : new MemoryRepo();
@@ -20,6 +28,9 @@ const app = buildApp({
   repo,
   store,
   failMode: process.env.CURB_FAIL_MODE === "open" ? "open" : "closed",
+  rateLimitPerMinute: numberFromEnv("CURB_RATE_LIMIT_PER_MINUTE", 600),
+  approvalTtlMs: numberFromEnv("CURB_APPROVAL_TTL_MS", 60 * 60_000),
+  bodyLimit: numberFromEnv("CURB_BODY_LIMIT_BYTES", 8 * 1024 * 1024),
   logger: true,
   notifier: notifierFromEnv({ onError: (err) => app.log.warn({ err }, "alert delivery failed") }),
 });

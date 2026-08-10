@@ -1,4 +1,5 @@
 import type {
+  CostWindowKey,
   RunState,
   RunStateDelta,
   RunStateStore,
@@ -27,6 +28,7 @@ export function emptyState(runId: string, now: number): RunState {
 /** In-memory store for single-process dev and tests. Production uses RedisRunStateStore. */
 export class InMemoryRunStateStore implements RunStateStore {
   private map = new Map<string, RunState>();
+  private costs = new Map<string, { usd: number; expiresAt: number }>();
   constructor(private now: () => number = () => 0) {}
 
   private ensure(runId: string): RunState {
@@ -68,5 +70,26 @@ export class InMemoryRunStateStore implements RunStateStore {
 
   async reset(runId: string): Promise<void> {
     this.map.delete(runId);
+  }
+
+  async bumpCost(key: CostWindowKey, costUsd: number): Promise<number> {
+    const current = this.readCost(key.bucket);
+    const usd = current + costUsd;
+    this.costs.set(key.bucket, { usd, expiresAt: this.now() + key.ttlSeconds * 1000 });
+    return usd;
+  }
+
+  async getCost(bucket: string): Promise<number> {
+    return this.readCost(bucket);
+  }
+
+  private readCost(bucket: string): number {
+    const entry = this.costs.get(bucket);
+    if (!entry) return 0;
+    if (entry.expiresAt <= this.now()) {
+      this.costs.delete(bucket);
+      return 0;
+    }
+    return entry.usd;
   }
 }

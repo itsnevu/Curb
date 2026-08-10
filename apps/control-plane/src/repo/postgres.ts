@@ -6,6 +6,7 @@ import type { Policy } from "@curb/shared";
 import type {
   Approval,
   ApprovalStatus,
+  DecideResult,
   EventRecord,
   Project,
   Repo,
@@ -160,15 +161,26 @@ export class PostgresRepo implements Repo {
     return r.rows.map(rowToApproval);
   }
 
-  async decideApproval(id: string, status: ApprovalStatus, by: string, at: number): Promise<Approval | null> {
+  async decideApproval(id: string, status: ApprovalStatus, by: string, at: number): Promise<DecideResult> {
     // why: WHERE status='pending' makes the first decision win atomically, with no
-    // explicit transaction, even if two people click at the same moment.
+    // explicit transaction, even if two people click at the same moment. The loser gets
+    // changed:false, so it neither writes a duplicate audit event nor re-wakes waiters.
     const r = await this.pool.query(
       `UPDATE approvals SET status=$2, decided_by=$3, decided_at=$4
        WHERE id=$1 AND status='pending' RETURNING *`,
       [id, status, by, new Date(at)],
     );
-    return r.rows[0] ? rowToApproval(r.rows[0]) : this.getApproval(id);
+    if (r.rows[0]) return { approval: rowToApproval(r.rows[0]), changed: true };
+    return { approval: await this.getApproval(id), changed: false };
+  }
+
+  async expirePendingApprovals(before: number, at: number): Promise<Approval[]> {
+    const r = await this.pool.query(
+      `UPDATE approvals SET status='expired', decided_at=$2, decided_by='curb:expiry'
+       WHERE status='pending' AND requested_at <= $1 RETURNING *`,
+      [new Date(before), new Date(at)],
+    );
+    return r.rows.map(rowToApproval);
   }
 
   async upsertRun(run: RunSummary): Promise<void> {

@@ -11,7 +11,7 @@ and destructive tool calls — enforced by one policy engine, at every point whe
 your agent touches the outside world.
 
 [![CI](https://github.com/itsnevu/Curb/actions/workflows/ci.yml/badge.svg)](https://github.com/itsnevu/Curb/actions/workflows/ci.yml)
-[![tests](https://img.shields.io/badge/tests-188%20passing-2f6f4e)](#development)
+[![tests](https://img.shields.io/badge/tests-236%20passing-2f6f4e)](#development)
 [![typescript](https://img.shields.io/badge/TypeScript-strict-3178c6)](#)
 [![python](https://img.shields.io/badge/Python-3.11%2B-3776ab)](#python-sdk)
 [![license](https://img.shields.io/badge/license-MIT-6b6862)](LICENSE)
@@ -63,6 +63,11 @@ A. Cost blowup — agent halted after passing $0.03
 
 B. Infinite loop — identical repeated messages detected
   ⛔ call 3 BLOCKED — Curb policy: loop_detect: identical message repeated 3x (limit 3)
+
+B2. One call too expensive to risk — refused before any money is spent
+  ⛔ call 1 BLOCKED — Curb policy: cost_cap: this call is estimated at $1.0000
+     and would take the run to $1.0000 (limit $0.005)
+  the request never reached the provider, so nothing was billed
 
 C. Dangerous action — held until a human decides
   ✋ agent requests permission to run 'delete_file' — execution HELD
@@ -139,7 +144,10 @@ from openai import OpenAI
 
 client = OpenAI(
     base_url="http://localhost:8080/v1",           # ← the only change
-    default_headers={"X-Curb-Run-Id": run_id},
+    default_headers={
+        "X-Curb-Run-Id": run_id,                   # ties calls into one run (one budget)
+        "X-Curb-Key": os.environ["CURB_API_KEY"],  # authenticates, and picks the project
+    },
 )
 ```
 
@@ -148,9 +156,16 @@ import { createOpenAI } from "@ai-sdk/openai";
 
 const model = createOpenAI({
   baseURL: "http://localhost:8080/v1",
-  headers: { "X-Curb-Run-Id": runId },
+  headers: { "X-Curb-Run-Id": runId, "X-Curb-Key": process.env.CURB_API_KEY! },
 })("gpt-4o");
 ```
+
+Both SDKs build these for you: `curb.gatewayHeaders()` / `curb.gateway_headers()`.
+
+The gateway refuses to start without `CURB_API_KEY` — an unauthenticated proxy is not
+only open to the world, it also has to take the caller's word for which project a request
+belongs to, which is the same as having no project-scoped policies at all. For local
+experiments set `CURB_ALLOW_ANONYMOUS=1` and it will run without auth (and say so).
 
 When a cost cap or loop breaker trips, the gateway returns `429` shaped exactly like the
 provider's own error — so your existing SDK surfaces it as a normal error and the agent
@@ -257,14 +272,25 @@ interface Policy {
 }
 ```
 
-| Type | Params | Behaviour | Enforced at |
+| Type | Params | Trips when | Enforced at |
 | :-- | :-- | :-- | :-- |
-| `cost_cap` | `maxUsd` | Sum run cost; over the limit → `DENY` | Gateway |
-| `loop_detect` | `maxRepeats`, `signatureWindow` | Identical message signature repeated, or a repeating tool cycle (`A→B→A→B→A→B`) → `DENY` | Gateway + SDK |
-| `rate_limit` | `maxCalls`, `perMs` | Sliding window per run → `THROTTLE` | Gateway |
-| `time_limit` | `maxWallClockMs` | Run older than the limit → `DENY` | Gateway + SDK |
-| `step_limit` | `maxSteps` | Steps beyond the limit → `DENY` | SDK |
-| `tool_permission` | `tools[]`, `sensitivity`, `mode` (`ask`/`deny`/`allow`) | Sensitive tool → `ASK` (human approval) or `DENY` | SDK |
+| `cost_cap` | `maxUsd`, `window` (`run`/`hour`/`day`), `preflight` | Cost spent in the window reaches `maxUsd`, **or** the estimated cost of the call about to be made would pass it | Gateway |
+| `loop_detect` | `maxRepeats`, `signatureWindow` | Identical message signature repeated, or a repeating tool cycle (`A→B→A→B→A→B`) | Gateway + SDK |
+| `rate_limit` | `maxCalls`, `perMs` | More than `maxCalls` inside a sliding window | Gateway |
+| `time_limit` | `maxWallClockMs` | Run older than the limit | Gateway + SDK |
+| `step_limit` | `maxSteps` | Steps beyond the limit | SDK |
+| `tool_permission` | `tools[]`, `sensitivity`, `mode` (optional override) | A tool matches by name or sensitivity | SDK |
+
+**`action` decides what happens when a policy trips** — `deny`, `ask`, `throttle`, or `allow`
+(which turns the rule into a no-op you can keep around). The evaluator decides *whether* the
+rule is broken; the action decides the consequence. So the same `cost_cap` can hard-stop one
+project and merely throttle another, with no code change. `tool_permission.mode` remains as
+an explicit per-policy override of `action`.
+
+**Cost caps hold the call before it happens.** `preflight` (on by default) prices the pending
+request from its prompt size and `max_tokens` and refuses it if that would break the cap —
+without it, a cap can only notice an overshoot after the money is gone. Windows wider than a
+run (`hour`, `day`) are counted per project in Redis.
 
 When several policies match, the **strictest effect wins**: `DENY > ASK > THROTTLE > ALLOW`.
 Policy order never changes the outcome.
@@ -291,7 +317,16 @@ These are enforced by tests, not just documented.
   like secrets (`password`, `token`, `api_key`, …) become `sha256:…` before they ever reach the
   approval queue — a human still sees enough context to decide.
 - **First decision wins.** Approve/Deny is atomic and cannot be reversed, even if two operators
-  click at the same moment.
+  click at the same moment; the loser gets a `409`, never a silent overwrite.
+- **A cap you cannot overshoot.** `cost_cap` prices the call *before* forwarding it, so one
+  expensive request cannot blow past the limit and be discovered after the money is gone.
+- **Tenants cannot collide.** Run ids come from the client, so run state is keyed by project
+  *and* run id — two projects using the same run id keep separate counters.
+- **The project comes from the key.** The gateway derives it from the authenticated API key,
+  never from a caller-supplied header, so an agent cannot escape a project-scoped policy by
+  inventing a project id.
+- **Nothing waits forever.** Undecided approvals expire (default 1 hour) instead of sitting in
+  the queue looking actionable long after the agent gave up.
 - **Long-poll, not naive polling.** Waiting SDKs hold one connection and are released the
   instant a human decides.
 
@@ -358,6 +393,10 @@ Raises `PolicyViolation` (with `.policy_id`, `.tool_name`) and `ApprovalTimeout`
 | :-- | :-- | :-- |
 | `CURB_API_KEY` | — | Project API key (gateway, SDKs, dashboard) |
 | `CURB_FAIL_MODE` | `closed` | `closed` = deny when unreachable, `open` = allow |
+| `CURB_ALLOW_ANONYMOUS` | unset | Let the gateway start with no API key. Local dev only — it refuses to boot otherwise |
+| `CURB_PROJECT_ID` | `default` | Project the gateway's key belongs to |
+| `CURB_RATE_LIMIT_PER_MINUTE` | `600` | Per-project request ceiling on the control plane; `0` disables |
+| `CURB_APPROVAL_TTL_MS` | `3600000` | How long an undecided approval stays actionable |
 | `DATABASE_URL` | — | Postgres. Unset → in-memory (fine for trying it out) |
 | `REDIS_URL` | — | Redis run state. Unset → in-memory |
 | `GATEWAY_PORT` | `8080` | Gateway port |
@@ -393,13 +432,13 @@ Zod / Pydantic · Vitest / pytest · pnpm workspaces.
 
 ```bash
 pnpm install
-pnpm test          # 157 TypeScript tests (168 with Postgres + Redis running)
+pnpm test          # 204 TypeScript tests (215 with Postgres + Redis running)
 pnpm typecheck     # build + tsc --noEmit across every package
 pnpm demo          # end-to-end demo in a single process
 
 # Python SDK
 cd sdks/python && python -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m pytest -q        # 20 tests
+.venv/bin/python -m pytest -q        # 21 tests
 ```
 
 Integration tests against real databases are opt-in — skipped when the env var is absent.
@@ -431,6 +470,11 @@ restart doesn't halt anything.
 One local hop plus a synchronous, in-process policy evaluation — no database call on the hot
 path. Audit is fire-and-forget and never blocks the request.
 
+**Does the gateway need a key too?**
+Yes. It refuses to start without `CURB_API_KEY` unless you explicitly set
+`CURB_ALLOW_ANONYMOUS=1` for local development. An unauthenticated gateway is both an open
+proxy and a policy bypass, because the project would then come from a header the caller writes.
+
 **How is the dashboard protected?**
 The page itself is public (you need it to sign in), but it contains no credential. You enter a
 project API key, the browser validates it and keeps it in `sessionStorage` for that tab only,
@@ -446,7 +490,7 @@ OpenAI and Anthropic message APIs, including streaming. Any OpenAI-compatible en
 pointing `OPENAI_UPSTREAM` at it.
 
 **Is it production-ready?**
-The engine, gateway, SDKs, and approval flow are covered by 188 tests including end-to-end runs,
+The engine, gateway, SDKs, and approval flow are covered by 236 tests (215 TypeScript — 11 of them needing live Postgres/Redis — plus 21 Python) including end-to-end runs,
 and CI exercises Postgres, Redis, and the full Docker Compose stack on every push. Two honest
 caveats: it has never been pointed at a real OpenAI or Anthropic endpoint (only a faithful fake
 upstream), and it is not multi-region or HA. The SDKs are not published to npm/PyPI yet.

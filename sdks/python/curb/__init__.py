@@ -13,6 +13,9 @@ from __future__ import annotations
 
 import contextvars
 import functools
+import hashlib
+import inspect
+import json
 import time
 import uuid
 from contextlib import contextmanager
@@ -20,8 +23,22 @@ from typing import Any, Callable, Dict, Iterator, Optional, TypeVar
 
 from .client import CurbClient
 from .errors import ApprovalTimeout, PolicyViolation
+from .redact import digest_args
 
-__all__ = ["Curb", "CurbClient", "PolicyViolation", "ApprovalTimeout", "current_run_id"]
+__all__ = [
+    "Curb",
+    "CurbClient",
+    "PolicyViolation",
+    "ApprovalTimeout",
+    "current_run_id",
+    "digest_args",
+]
+
+
+def _signature_of(value: Any) -> str:
+    """Stable short hash of anything, for the semantic half of loop detection."""
+    text = json.dumps(value, default=str, sort_keys=True)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -45,6 +62,7 @@ class Curb:
         fail_mode: str = "closed",
         client: Optional[CurbClient] = None,
         on_decision: Optional[Callable[[Dict[str, Any], Dict[str, Any]], None]] = None,
+        send_raw_tool_args: bool = False,
     ) -> None:
         self.client = client or CurbClient(base_url, api_key)
         self._run_id = run_id
@@ -53,6 +71,9 @@ class Curb:
         self.approval_timeout_s = approval_timeout_s
         self.fail_mode = fail_mode
         self.on_decision = on_decision
+        # Tool arguments are summarised before they leave this process unless you
+        # explicitly opt out. See curb.redact.
+        self.send_raw_tool_args = send_raw_tool_args
 
     # ── run context ────────────────────────────────────────────────────────
     @contextmanager
@@ -69,13 +90,29 @@ class Curb:
         return current_run_id() or self._run_id or "run-without-context"
 
     def gateway_headers(self) -> Dict[str, str]:
-        """Attach to your LLM client so cost and loops are caught by the gateway."""
-        return {"X-Curb-Run-Id": self.run_id()}
+        """Attach to your LLM client so cost and loops are caught by the gateway.
+
+        The run id ties calls together; the key authenticates them. Without the run id
+        every call looks like a fresh run with a fresh budget, and an authenticated
+        gateway rejects calls that carry no key.
+        """
+        headers = {"X-Curb-Run-Id": self.run_id()}
+        if self.client.api_key:
+            headers["X-Curb-Key"] = self.client.api_key
+        return headers
 
     # ── enforcement ────────────────────────────────────────────────────────
-    def step(self, **meta: Any) -> None:
-        """Report one agent step — enforces step_limit and time_limit."""
-        self._enforce({"kind": "step", "runId": self.run_id(), "meta": meta or {}})
+    def step(self, signature: Any = None, **meta: Any) -> None:
+        """Report one agent step — enforces step_limit, time_limit and loop_detect.
+
+        Pass `signature=` (the conversation or plan behind this step) to enable the
+        semantic half of loop detection; without it only repeating TOOL cycles are
+        visible, so an agent spinning on the same prompt looks healthy.
+        """
+        ctx: Dict[str, Any] = {"kind": "step", "runId": self.run_id(), "meta": meta or {}}
+        if signature is not None:
+            ctx["signature"] = _signature_of(signature)
+        self._enforce(ctx)
 
     def decide(self, **ctx: Any) -> Dict[str, Any]:
         payload = {"runId": self.run_id()}
@@ -89,22 +126,41 @@ class Curb:
         sensitivity: str = "low",
         approval_timeout_s: Optional[float] = None,
     ) -> Callable[..., Any]:
-        """Wrap a tool: the policy engine is consulted BEFORE the tool executes."""
+        """Wrap a tool: the policy engine is consulted BEFORE the tool executes.
+
+        Async tools are wrapped as async, so `await remove(path)` keeps working and the
+        approval wait does not block the event loop's thread any more than the tool would.
+        """
         tool_name = name or getattr(fn, "__name__", "tool")
 
-        @functools.wraps(fn)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
+        def gate(args: Any, kwargs: Any) -> None:
+            raw = {"args": list(args), "kwargs": kwargs}
             self._enforce(
                 {
                     "kind": "tool_call",
                     "runId": self.run_id(),
                     "toolName": tool_name,
                     "sensitivity": sensitivity,
-                    "toolArgs": {"args": list(args), "kwargs": kwargs},
+                    # Redacted here, not on the server: a secret that never leaves this
+                    # process cannot leak from the control plane.
+                    "toolArgs": raw if self.send_raw_tool_args else digest_args(raw),
                 },
                 tool_name=tool_name,
                 approval_timeout_s=approval_timeout_s,
             )
+
+        if inspect.iscoroutinefunction(fn):
+
+            @functools.wraps(fn)
+            async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
+                gate(args, kwargs)
+                return await fn(*args, **kwargs)
+
+            return async_wrapper
+
+        @functools.wraps(fn)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            gate(args, kwargs)
             return fn(*args, **kwargs)
 
         return wrapper

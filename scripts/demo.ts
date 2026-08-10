@@ -46,7 +46,15 @@ async function main() {
 
   console.log(`\n\x1b[1mCurb\x1b[0m — dashboard: \x1b[4m${cpUrl}\x1b[0m   gateway: ${gwUrl}   (api key: ${KEY})`);
 
-  await policy({ name: "cost cap $0.03/run", type: "cost_cap", action: "deny", params: { maxUsd: 0.03 } });
+  // Scoped per run so each scenario demonstrates exactly one thing.
+  await policy({
+    name: "cost cap $0.03/run", type: "cost_cap", action: "deny",
+    scope: { run: "demo-cost" }, params: { maxUsd: 0.03, preflight: false },
+  });
+  await policy({
+    name: "cost cap $0.005 with preflight", type: "cost_cap", action: "deny",
+    scope: { run: "demo-preflight" }, params: { maxUsd: 0.005 },
+  });
   await policy({ name: "loop detect", type: "loop_detect", action: "deny", params: { maxRepeats: 3 } });
   await policy({
     name: "delete_file requires approval", type: "tool_permission", action: "ask",
@@ -62,11 +70,11 @@ async function main() {
     if (!res.ok) throw new Error(`failed to create policy: ${await res.text()}`);
   }
 
-  const llm = async (runId: string, isi: string) => {
+  const llm = async (runId: string, isi: string, over: Record<string, unknown> = {}) => {
     const res = await fetch(`${gwUrl}/v1/chat/completions`, {
       method: "POST",
       headers: { "content-type": "application/json", "x-curb-run-id": runId, authorization: "Bearer sk-palsu" },
-      body: JSON.stringify({ model: "gpt-4o", messages: [{ role: "user", content: isi }] }),
+      body: JSON.stringify({ model: "gpt-4o", max_tokens: 1000, messages: [{ role: "user", content: isi }], ...over }),
     });
     return { status: res.status, cost: res.headers.get("x-curb-cost-usd"), body: await res.json() as any };
   };
@@ -90,6 +98,17 @@ async function main() {
     else {
       c.blok(`call ${i} BLOCKED — ${r.body.error.message}`);
       break;
+    }
+  }
+
+  // ── B2. Preflight ──────────────────────────────────────────────────────
+  c.judul("B2. One call too expensive to risk — refused before any money is spent");
+  {
+    const r = await llm("demo-preflight", "write me a novel", { max_tokens: 100_000 });
+    if (r.status === 200) c.ok("call passed (unexpected)");
+    else {
+      c.blok(`call 1 BLOCKED — ${r.body.error.message}`);
+      c.info("the request never reached the provider, so nothing was billed");
     }
   }
 

@@ -45,6 +45,16 @@ export interface Context {
   messages?: unknown[];
   model?: string;
   estimatedTokens?: number;
+  /**
+   * Worst-case cost of the call about to be made, in USD. The caller estimates it
+   * BEFORE forwarding so a cost cap can hold the call instead of discovering the
+   * overshoot afterwards. See `cost_cap`.
+   */
+  estimatedCostUsd?: number;
+  /** Cost already spent inside wider windows (used by cost_cap window: hour/day). */
+  costWindows?: { hour?: number; day?: number };
+  /** Loop-detection signature of this call, when the caller can compute one. */
+  signature?: string;
   // tool_call:
   toolName?: string;
   toolArgs?: unknown;
@@ -59,6 +69,12 @@ export interface Decision {
   policyId?: string;
   reason?: string;
   retryAfterMs?: number;
+  /**
+   * Internal: the evaluator already resolved the effect itself (e.g. tool_permission
+   * with an explicit `mode`), so the engine must not remap it from `policy.action`.
+   * Stripped before a decision leaves the engine.
+   */
+  final?: boolean;
 }
 
 /** Per-run state (Redis / in-memory). Ephemeral. */
@@ -86,6 +102,14 @@ export interface RunStateDelta {
 /** Which windows can be pushed to (all bounded / capped). */
 export type WindowKey = "sigWindow" | "toolWindow" | "callTimestamps";
 
+/** A cost counter wider than a single run (e.g. "project X, this hour"). */
+export interface CostWindowKey {
+  /** Stable identifier of the bucket, e.g. `proj:hour:483210`. */
+  bucket: string;
+  /** How long the bucket should survive, in seconds. */
+  ttlSeconds: number;
+}
+
 export interface RunStateStore {
   get(runId: string): Promise<RunState>;
   save(state: RunState): Promise<void>;
@@ -104,6 +128,11 @@ export interface RunStateStore {
   ): Promise<Array<string | number>>;
   /** Drop a run's state (used by tests and when a run finishes). */
   reset(runId: string): Promise<void>;
+
+  /** Add to a cost bucket wider than one run, and return the new total. */
+  bumpCost(key: CostWindowKey, costUsd: number): Promise<number>;
+  /** Read a cost bucket. Returns 0 when the bucket has expired or never existed. */
+  getCost(bucket: string): Promise<number>;
 }
 
 /** Strictness order: DENY > ASK > THROTTLE > ALLOW */
@@ -112,4 +141,15 @@ export const EFFECT_SEVERITY: Record<Effect, number> = {
   ASK: 2,
   THROTTLE: 1,
   ALLOW: 0,
+};
+
+/**
+ * What a policy does when it trips. This is the ONLY place `policy.action` becomes an
+ * effect — evaluators decide *whether* a rule is broken, the action decides *what happens*.
+ */
+export const ACTION_EFFECT: Record<Action, Effect> = {
+  deny: "DENY",
+  ask: "ASK",
+  throttle: "THROTTLE",
+  allow: "ALLOW",
 };

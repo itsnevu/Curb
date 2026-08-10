@@ -2,6 +2,7 @@ import type { Policy } from "@curb/shared";
 import type {
   Approval,
   ApprovalStatus,
+  DecideResult,
   EventRecord,
   Project,
   Repo,
@@ -75,19 +76,46 @@ export class MemoryRepo implements Repo {
       .filter((a) => !status || a.status === status)
       .sort((a, b) => b.requestedAt - a.requestedAt);
   }
-  async decideApproval(id: string, status: ApprovalStatus, by: string, at: number) {
+  async decideApproval(id: string, status: ApprovalStatus, by: string, at: number): Promise<DecideResult> {
     const a = this.approvals.get(id);
-    if (!a) return null;
+    if (!a) return { approval: null, changed: false };
     // why: the first decision wins — approve/deny must not be reversible.
-    if (a.status !== "pending") return a;
+    if (a.status !== "pending") return { approval: a, changed: false };
     const next = { ...a, status, decidedBy: by, decidedAt: at };
     this.approvals.set(id, next);
-    return next;
+    return { approval: next, changed: true };
+  }
+
+  async expirePendingApprovals(before: number, at: number): Promise<Approval[]> {
+    const expired: Approval[] = [];
+    for (const [id, a] of this.approvals) {
+      if (a.status !== "pending" || a.requestedAt > before) continue;
+      const next: Approval = { ...a, status: "expired", decidedAt: at, decidedBy: "curb:expiry" };
+      this.approvals.set(id, next);
+      expired.push(next);
+    }
+    return expired;
   }
 
   async upsertRun(run: RunSummary) {
     const prev = this.runs.get(run.id);
-    this.runs.set(run.id, prev ? { ...prev, ...run } : run);
+    if (!prev) {
+      this.runs.set(run.id, run);
+      return;
+    }
+    // why: counters only ever grow. Events arrive out of order (the gateway batches
+    // them), and a late event carrying a smaller snapshot must not rewind a run's
+    // totals. Mirrors the GREATEST()/COALESCE() in the Postgres upsert.
+    this.runs.set(run.id, {
+      ...prev,
+      ...run,
+      startedAt: Math.min(prev.startedAt, run.startedAt),
+      endedAt: run.endedAt ?? prev.endedAt,
+      totalTokens: Math.max(prev.totalTokens, run.totalTokens),
+      totalCostUsd: Math.max(prev.totalCostUsd, run.totalCostUsd),
+      stepCount: Math.max(prev.stepCount, run.stepCount),
+      verdict: run.verdict ?? prev.verdict,
+    });
   }
   async listRuns(projectId: string, limit = 50) {
     return [...this.runs.values()]

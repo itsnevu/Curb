@@ -1,4 +1,5 @@
 import type {
+  CostWindowKey,
   RunState,
   RunStateDelta,
   RunStateStore,
@@ -9,6 +10,8 @@ import { WINDOW_CAPS, emptyState } from "./state.js";
 /** The subset of ioredis we use — easy to mock, and not tied to a specific version. */
 export interface RedisLike {
   hgetall(key: string): Promise<Record<string, string>>;
+  get(key: string): Promise<string | null>;
+  incrbyfloat(key: string, inc: number): Promise<string>;
   hsetnx(key: string, field: string, value: string | number): Promise<number>;
   hincrby(key: string, field: string, inc: number): Promise<number>;
   hincrbyfloat(key: string, field: string, inc: number): Promise<string>;
@@ -120,6 +123,24 @@ export class RedisRunStateStore implements RunStateStore {
     await this.redis.expire(k, this.ttl);
     const out = await this.redis.lrange(k, 0, -1);
     return NUMERIC_WINDOWS.includes(key) ? out.map(Number) : out;
+  }
+
+  /** Cross-run cost buckets (per project, per hour/day). Atomic, like the run counters. */
+  async bumpCost(key: CostWindowKey, costUsd: number): Promise<number> {
+    const k = this.costKey(key.bucket);
+    const total = await this.redis.incrbyfloat(k, costUsd);
+    await this.redis.expire(k, key.ttlSeconds);
+    return Number(total);
+  }
+
+  async getCost(bucket: string): Promise<number> {
+    const raw = await this.redis.get(this.costKey(bucket));
+    const n = Number(raw ?? 0);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  private costKey(bucket: string) {
+    return `${this.prefix}cost:${bucket}`;
   }
 
   async reset(runId: string): Promise<void> {

@@ -134,7 +134,7 @@ describe("scope & when", () => {
 describe("strictest decision wins", () => {
   const cost = P({ id: "a", type: "cost_cap", params: { maxUsd: 2 } });
   const ask = P({ id: "b", type: "tool_permission", params: { tools: ["x"], mode: "ask" } });
-  const throttle = P({ id: "c", type: "rate_limit", params: { maxCalls: 0, perMs: 1000 } });
+  const throttle = P({ id: "c", type: "rate_limit", action: "throttle", params: { maxCalls: 0, perMs: 1000 } });
   const c = ctx({ kind: "tool_call", toolName: "x", now: 10 });
 
   it("DENY > ASK", () => {

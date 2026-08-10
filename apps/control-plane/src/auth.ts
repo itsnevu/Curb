@@ -1,16 +1,13 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash } from "node:crypto";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { Project, Repo } from "./repo/types.js";
 
-/** API keys are stored hashed — the raw key never touches the database. */
+/**
+ * API keys are stored hashed — the raw key never touches the database.
+ * Lookup is by hash, so there is no secret-to-secret comparison to time-attack.
+ */
 export function hashApiKey(key: string): string {
   return createHash("sha256").update(key).digest("hex");
-}
-
-export function keysMatch(a: string, b: string): boolean {
-  const ba = Buffer.from(a);
-  const bb = Buffer.from(b);
-  return ba.length === bb.length && timingSafeEqual(ba, bb);
 }
 
 export function apiKeyOf(req: FastifyRequest): string | null {

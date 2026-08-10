@@ -10,11 +10,12 @@ export async function forwardUpstream(
   headers: Record<string, string>,
   body: unknown,
   streaming: boolean,
+  method = "POST",
 ): Promise<UpstreamResponse> {
   const res = await request(url, {
-    method: "POST",
-    headers: { ...headers, "content-type": "application/json" },
-    body: JSON.stringify(body),
+    method: method as "GET" | "POST",
+    headers: body === undefined ? headers : { ...headers, "content-type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
     // why: streams can idle for a long time between tokens — don't cut them off.
     headersTimeout: streaming ? 120_000 : 60_000,
     bodyTimeout: streaming ? 0 : 120_000,

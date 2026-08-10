@@ -161,11 +161,21 @@ describe("approval flow end-to-end (M2 acceptance)", () => {
     expect(res.json().status).toBe("pending");
   });
 
-  it("the first decision wins; a second click does not reverse it", async () => {
+  it("the first decision wins; a second click is refused with 409", async () => {
     const { approvalId } = (await ask()).json();
-    await post(`/v1/approvals/${approvalId}/decide`, { approve: true, by: "alice" });
+    const first = await post(`/v1/approvals/${approvalId}/decide`, { approve: true, by: "alice" });
+    expect(first.statusCode).toBe(200);
+
     const second = await post(`/v1/approvals/${approvalId}/decide`, { approve: false, by: "bob" });
-    expect(second.json()).toMatchObject({ status: "approved", decidedBy: "alice" });
+    expect(second.statusCode).toBe(409);
+    expect(second.json()).toMatchObject({
+      error: { type: "curb_already_decided" },
+      approval: { status: "approved", decidedBy: "alice" },
+    });
+
+    // and the stored decision is untouched
+    const stored = (await get(`/v1/approvals/${approvalId}`)).json();
+    expect(stored).toMatchObject({ status: "approved", decidedBy: "alice" });
   });
 
   it("tool arguments are stored redacted; secrets do not leak", async () => {

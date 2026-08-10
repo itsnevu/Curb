@@ -1,15 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { FastifyInstance } from "fastify";
-import { PolicySchema } from "@curb/shared";
+import { PolicySchema, PolicyShapeSchema } from "@curb/shared";
 import type { Repo } from "../repo/types.js";
 
 /** The server may generate the id; everything else must satisfy PolicySchema. */
-const CreateSchema = PolicySchema.extend({
+const CreateSchema = PolicyShapeSchema.extend({
   id: z.string().min(1).optional(),
   enabled: z.boolean().default(true),
-  scope: PolicySchema.shape.scope.default({}),
-  params: PolicySchema.shape.params.default({}),
+  scope: PolicyShapeSchema.shape.scope.default({}),
+  params: PolicyShapeSchema.shape.params.default({}),
 });
 
 export function registerPolicies(app: FastifyInstance, repo: Repo) {
@@ -27,9 +27,14 @@ export function registerPolicies(app: FastifyInstance, repo: Repo) {
       return reply.code(400).send({ error: { message: "invalid policy", details: parsed.error.format() } });
     }
     const policy = { ...parsed.data, id: parsed.data.id ?? `pol_${randomUUID().slice(0, 8)}` };
-    const validated = PolicySchema.parse(policy);
-    await repo.putPolicy(req.project!.id, validated);
-    return reply.code(201).send(validated);
+    // Second pass: validates params against the rules for this policy type and fills
+    // their defaults, so a stored policy is never half-specified.
+    const full = PolicySchema.safeParse(policy);
+    if (!full.success) {
+      return reply.code(400).send({ error: { message: "invalid policy", details: full.error.format() } });
+    }
+    await repo.putPolicy(req.project!.id, full.data);
+    return reply.code(201).send(full.data);
   });
 
   app.put("/v1/policies/:id", async (req, reply) => {

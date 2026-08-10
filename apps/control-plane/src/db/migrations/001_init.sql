@@ -1,4 +1,4 @@
--- Skema Curb, mengikuti DESIGN.md §6.
+-- Curb schema, following DESIGN.md §6.
 
 CREATE TABLE IF NOT EXISTS orgs (
   id          TEXT PRIMARY KEY,
@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS events (
   effect        TEXT NOT NULL,
   policy_id     TEXT,
   reason        TEXT,
-  -- konteks sudah diringkas oleh pengirim; prompt mentah TIDAK pernah disimpan
+  -- context is summarised by the sender; raw prompts are NEVER stored
   context_json  JSONB NOT NULL DEFAULT '{}'::jsonb,
   decision_json JSONB NOT NULL DEFAULT '{}'::jsonb
 );
@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS approvals (
   run_id        TEXT NOT NULL,
   project_id    TEXT,
   tool_name     TEXT NOT NULL,
-  -- args diringkas/di-redact oleh SDK sebelum dikirim
+  -- arguments are redacted by the SDK before they are sent, and again on arrival
   args_json     JSONB NOT NULL DEFAULT '{}'::jsonb,
   reason        TEXT,
   policy_id     TEXT,

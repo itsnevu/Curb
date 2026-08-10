@@ -5,7 +5,7 @@ import type { Repo } from "../repo/types.js";
 
 const DecideSchema = z.object({
   approve: z.boolean(),
-  by: z.string().default("dashboard"),
+  by: z.string().min(1).max(200).default("dashboard"),
 });
 
 const MAX_WAIT_MS = 60_000;
@@ -30,11 +30,15 @@ export function registerApprovals(
     const { wait } = req.query as { wait?: string };
     const waitMs = Math.min(Number(wait ?? 0) || 0, MAX_WAIT_MS);
 
-    const approval = waitMs > 0 ? await hub.wait(id, waitMs) : await repo.getApproval(id);
-    if (!approval) return reply.code(404).send({ error: { message: "approval not found" } });
-    if (approval.projectId && approval.projectId !== req.project!.id) {
+    // why check ownership BEFORE waiting: otherwise a caller could hold a connection
+    // open against another project's approval id and learn when it gets decided.
+    const existing = await repo.getApproval(id);
+    if (!existing || (existing.projectId && existing.projectId !== req.project!.id)) {
       return reply.code(404).send({ error: { message: "approval not found" } });
     }
+
+    const approval = waitMs > 0 ? await hub.wait(id, waitMs) : existing;
+    if (!approval) return reply.code(404).send({ error: { message: "approval not found" } });
     return approval;
   });
 
@@ -48,28 +52,38 @@ export function registerApprovals(
     if (!existing || (existing.projectId && existing.projectId !== req.project!.id)) {
       return reply.code(404).send({ error: { message: "approval not found" } });
     }
-    const decided = await repo.decideApproval(
+
+    const { approval, changed } = await repo.decideApproval(
       id,
       parsed.data.approve ? "approved" : "denied",
       parsed.data.by,
       now(),
     );
-    if (!decided) return reply.code(404).send({ error: { message: "approval not found" } });
+    if (!approval) return reply.code(404).send({ error: { message: "approval not found" } });
+
+    // Already decided (or expired): report the existing state, and — importantly — do
+    // not write a second audit event for a decision that only happened once.
+    if (!changed) {
+      return reply.code(409).send({
+        error: { message: `approval is already ${approval.status}`, type: "curb_already_decided" },
+        approval,
+      });
+    }
 
     await repo.appendEvents([
       {
-        runId: decided.runId,
-        projectId: decided.projectId,
+        runId: approval.runId,
+        projectId: approval.projectId,
         ts: now(),
         kind: "approval",
-        effect: decided.status === "approved" ? "ALLOW" : "DENY",
-        policyId: decided.policyId,
-        reason: `approval ${decided.status} by ${decided.decidedBy}`,
-        context: { approvalId: id, toolName: decided.toolName },
+        effect: approval.status === "approved" ? "ALLOW" : "DENY",
+        policyId: approval.policyId,
+        reason: `approval ${approval.status} by ${approval.decidedBy}`,
+        context: { approvalId: id, toolName: approval.toolName },
       },
     ]);
 
-    hub.publish(decided); // wake up any SDK currently long-polling
-    return decided;
+    hub.publish(approval); // wake up any SDK currently long-polling
+    return approval;
   });
 }

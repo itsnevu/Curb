@@ -10,7 +10,7 @@ curb = Curb(base_url="http://localhost:8090")
 with curb.run() as run_id:
     client = OpenAI(
         base_url="http://localhost:8080/v1",   # ← the only change
-        default_headers=curb.gateway_headers(),
+        default_headers=curb.gateway_headers(),   # carries the key AND the run id
     )
     for i in range(100):
         # When the cost cap or loop breaker trips, this raises a 429 from the

@@ -11,7 +11,8 @@
     "typecheck": "pnpm -r build && pnpm -r typecheck",
     "up": "docker compose up -d",
     "down": "docker compose down",
-    "demo": "tsx scripts/demo.ts"
+    "demo": "tsx scripts/demo.ts",
+    "verify:examples": "tsx scripts/verify-examples.ts"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",

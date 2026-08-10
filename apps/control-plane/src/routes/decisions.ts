@@ -1,20 +1,23 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { FastifyInstance } from "fastify";
-import { evaluate } from "@curb/policy-engine";
-import type { Context, Decision, RunStateStore } from "@curb/shared";
+import { costWindowKeys, evaluate, runKey } from "@curb/policy-engine";
+import { digestArgs, type Context, type Decision, type RunState, type RunStateStore } from "@curb/shared";
 import type { Approval, EventRecord, Repo } from "../repo/types.js";
-import { digestArgs } from "../redact.js";
 import type { Notifier } from "../notify.js";
 
 const DecisionRequestSchema = z.object({
   kind: z.enum(["llm_call", "tool_call", "step"]),
-  runId: z.string().min(1),
-  toolName: z.string().optional(),
+  runId: z.string().min(1).max(200),
+  toolName: z.string().max(200).optional(),
   toolArgs: z.unknown().optional(),
   sensitivity: z.enum(["low", "medium", "high"]).optional(),
-  model: z.string().optional(),
-  env: z.string().optional(),
+  model: z.string().max(200).optional(),
+  env: z.string().max(100).optional(),
+  /** Loop-detection signature, when the SDK can compute one for this call. */
+  signature: z.string().max(200).optional(),
+  /** Cost the caller expects this action to incur, for pre-flight cost caps. */
+  estimatedCostUsd: z.number().nonnegative().optional(),
   meta: z.record(z.unknown()).optional(),
 });
 
@@ -24,6 +27,7 @@ export interface DecisionDeps {
   now: () => number;
   failMode: "open" | "closed";
   notifier: Notifier;
+  approvalTtlMs?: number;
 }
 
 export function registerDecisions(app: FastifyInstance, deps: DecisionDeps) {
@@ -35,18 +39,45 @@ export function registerDecisions(app: FastifyInstance, deps: DecisionDeps) {
     const projectId = req.project!.id;
     const input = parsed.data;
     const t = deps.now();
+    // Run state is namespaced by project: run ids come from the caller, so two projects
+    // can pick the same one, and they must never share a cost counter.
+    const stateKey = runKey(projectId, input.runId);
 
-    // Windows and counters are updated before evaluate so this call is counted too.
-    if (input.kind === "tool_call" && input.toolName) {
-      await deps.store.pushWindow(input.runId, "toolWindow", input.toolName, 24);
-    }
-    if (input.kind === "step") {
-      await deps.store.bump(input.runId, { steps: 1 });
-    }
-    await deps.store.pushWindow(input.runId, "callTimestamps", t, 200);
-    const state = await deps.store.get(input.runId);
+    const stored = await deps.store.get(stateKey);
+    const buckets = costWindowKeys(projectId, t);
+    const [hourSpend, daySpend] = await Promise.all([
+      deps.store.getCost(buckets.hour.bucket),
+      deps.store.getCost(buckets.day.bucket),
+    ]);
 
-    const ctx: Context = { ...input, projectId, now: t } as Context;
+    // Evaluate against the windows AS THEY WOULD BE with this call included, but only
+    // persist once the call is allowed — a blocked call must not pollute the windows.
+    const state: RunState = {
+      ...stored,
+      stepCount: stored.stepCount + (input.kind === "step" ? 1 : 0),
+      toolWindow:
+        input.kind === "tool_call" && input.toolName
+          ? [...stored.toolWindow, input.toolName].slice(-24)
+          : stored.toolWindow,
+      sigWindow: input.signature ? [...stored.sigWindow, input.signature].slice(-20) : stored.sigWindow,
+      callTimestamps: [...stored.callTimestamps, t].slice(-200),
+    };
+
+    const ctx: Context = {
+      kind: input.kind,
+      runId: input.runId,
+      projectId,
+      env: input.env,
+      model: input.model,
+      toolName: input.toolName,
+      toolArgs: input.toolArgs,
+      sensitivity: input.sensitivity,
+      signature: input.signature,
+      estimatedCostUsd: input.estimatedCostUsd,
+      costWindows: { hour: hourSpend, day: daySpend },
+      meta: input.meta,
+      now: t,
+    };
 
     let decision: Decision;
     try {
@@ -59,6 +90,10 @@ export function registerDecisions(app: FastifyInstance, deps: DecisionDeps) {
           : { effect: "DENY", policyId: "curb_fail_closed", reason: "policy engine unavailable (fail-closed)" };
     }
 
+    if (decision.effect !== "DENY") {
+      await persist(deps, stateKey, input, t);
+    }
+
     let approvalId: string | undefined;
     if (decision.effect === "ASK") {
       approvalId = `apr_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
@@ -67,7 +102,8 @@ export function registerDecisions(app: FastifyInstance, deps: DecisionDeps) {
         runId: input.runId,
         projectId,
         toolName: input.toolName ?? "unknown",
-        // why: tool arguments can contain secrets — store only a redacted summary.
+        // Redacted again here: the SDKs redact before sending, but a third-party client
+        // might not, and raw secrets must never reach storage.
         args: digestArgs(input.toolArgs),
         reason: decision.reason,
         policyId: decision.policyId,
@@ -102,6 +138,27 @@ export function registerDecisions(app: FastifyInstance, deps: DecisionDeps) {
       verdict: decision.effect === "DENY" ? decision.policyId : undefined,
     });
 
-    return { ...decision, approvalId, runId: input.runId };
+    return {
+      ...decision,
+      approvalId,
+      runId: input.runId,
+      approvalExpiresAt: approvalId ? t + (deps.approvalTtlMs ?? 60 * 60_000) : undefined,
+    };
   });
+}
+
+/** Commit this call's effect on the run's counters and windows. */
+async function persist(
+  deps: DecisionDeps,
+  stateKey: string,
+  input: z.infer<typeof DecisionRequestSchema>,
+  t: number,
+): Promise<void> {
+  const work: Array<Promise<unknown>> = [deps.store.pushWindow(stateKey, "callTimestamps", t, 200)];
+  if (input.kind === "step") work.push(deps.store.bump(stateKey, { steps: 1 }));
+  if (input.kind === "tool_call" && input.toolName) {
+    work.push(deps.store.pushWindow(stateKey, "toolWindow", input.toolName, 24));
+  }
+  if (input.signature) work.push(deps.store.pushWindow(stateKey, "sigWindow", input.signature, 20));
+  await Promise.all(work);
 }

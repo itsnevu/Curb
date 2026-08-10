@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
-import type { Context } from "@curb/shared";
+import { digestArgs, hashOf, type Context } from "@curb/shared";
 import { CurbClient, type ClientOptions, type DecisionResponse } from "./client.js";
 import { ApprovalTimeout, PolicyViolation } from "./errors.js";
 
@@ -17,6 +17,11 @@ export interface CurbOptions extends ClientOptions {
   approvalTimeoutMs?: number;
   /** What happens when Curb is unreachable. Defaults to "closed" (deny). */
   failMode?: "open" | "closed";
+  /**
+   * Send tool arguments unredacted. Off by default, and worth leaving off: the approval
+   * queue only needs enough context to judge an action, not your credentials.
+   */
+  sendRawToolArgs?: boolean;
   onDecision?: (d: DecisionResponse, ctx: Context) => void;
 }
 
@@ -58,14 +63,32 @@ export class Curb {
     return currentRunId() ?? this.opts.runId ?? "run-without-context";
   }
 
-  /** Headers to attach to your LLM client so cost and loops are caught by the gateway. */
+  /**
+   * Headers to attach to your LLM client so cost and loops are caught by the gateway:
+   * the run id ties calls together, and the key authenticates them. Both matter —
+   * an authenticated gateway rejects the call without the key, and without the run id
+   * every call looks like a brand new run with a fresh budget.
+   */
   gatewayHeaders(): Record<string, string> {
-    return { "X-Curb-Run-Id": this.runId() };
+    const key = this.opts.apiKey ?? process.env.CURB_API_KEY;
+    return { "X-Curb-Run-Id": this.runId(), ...(key ? { "X-Curb-Key": key } : {}) };
   }
 
-  /** Report one agent step — enforces step_limit, time_limit and loop_detect. */
+  /**
+   * Report one agent step — enforces step_limit, time_limit and loop_detect.
+   *
+   * Pass `{ signature: <the conversation or plan for this step> }` to feed the semantic
+   * half of loop detection: without a signature the SDK can only see repeating TOOL
+   * cycles, so an agent that spins on the same prompt without calling tools looks fine.
+   */
   async step(meta: Record<string, unknown> = {}): Promise<void> {
-    await this.enforce({ kind: "step", runId: this.runId(), meta });
+    const { signature, ...rest } = meta;
+    await this.enforce({
+      kind: "step",
+      runId: this.runId(),
+      signature: signature === undefined ? undefined : hashOf(signature),
+      meta: rest,
+    });
   }
 
   /**
@@ -80,7 +103,10 @@ export class Curb {
           runId: this.runId(),
           toolName: meta.name,
           sensitivity: meta.sensitivity,
-          toolArgs: args,
+          // why redact HERE and not on the server: a tool argument can hold a password
+          // or an access token. Summarising before the request means the secret never
+          // leaves this process — the approver still sees enough to judge the action.
+          toolArgs: this.opts.sendRawToolArgs ? args : digestArgs(args),
         },
         meta,
       );

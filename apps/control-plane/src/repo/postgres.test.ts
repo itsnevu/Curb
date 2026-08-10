@@ -78,7 +78,16 @@ suite("PostgresRepo", () => {
       repo.decideApproval(id, "approved", "alice", Date.now()),
       repo.decideApproval(id, "denied", "bob", Date.now()),
     ]);
-    expect(a!.status).toBe(b!.status);
-    expect((await repo.getApproval(id))!.decidedBy).toBe(a!.decidedBy);
+
+    // exactly one caller may claim the decision
+    expect([a.changed, b.changed].filter(Boolean)).toHaveLength(1);
+    const winner = a.changed ? a : b;
+    const loser = a.changed ? b : a;
+
+    // both see the same final state, and the loser did not overwrite it
+    expect(loser.approval!.status).toBe(winner.approval!.status);
+    const stored = await repo.getApproval(id);
+    expect(stored!.decidedBy).toBe(winner.approval!.decidedBy);
+    expect(stored!.status).toBe(winner.approval!.status);
   });
 });

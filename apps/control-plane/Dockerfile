@@ -1,16 +1,22 @@
 FROM node:20-slim AS build
 WORKDIR /app
 RUN corepack enable
-COPY pnpm-workspace.yaml package.json pnpm-lock.yaml* tsconfig.base.json ./
+COPY pnpm-workspace.yaml package.json pnpm-lock.yaml tsconfig.base.json ./
 COPY packages ./packages
 COPY apps/control-plane ./apps/control-plane
-RUN pnpm install --frozen-lockfile=false
+# The lockfile is authoritative: a build that silently resolves different versions than
+# the ones tested is not the thing that was tested.
+RUN pnpm install --frozen-lockfile
 RUN pnpm --filter @curb/shared --filter @curb/policy-engine --filter @curb/control-plane build
+# Drop dev dependencies (typescript, vitest, …) before they are copied into the runtime.
+RUN pnpm --filter @curb/shared --filter @curb/policy-engine --filter @curb/control-plane prune --prod
 
 FROM node:20-slim
 WORKDIR /app
-RUN corepack enable
 ENV NODE_ENV=production
-COPY --from=build /app ./
+COPY --from=build --chown=node:node /app ./
+USER node
 EXPOSE 8090
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s \
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.CONTROL_PLANE_PORT||8090)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 CMD ["node", "apps/control-plane/dist/index.js"]

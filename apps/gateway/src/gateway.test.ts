@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { Readable } from "node:stream";
 import type { FastifyInstance } from "fastify";
-import { InMemoryRunStateStore } from "@curb/policy-engine";
+import { InMemoryRunStateStore, runKey } from "@curb/policy-engine";
 import type { Policy } from "@curb/shared";
 import { buildApp, type UpstreamResponse } from "./app.js";
+import { keyAuthenticator, secretsMatch } from "./auth.js";
 import { PriceTable } from "./pricing.js";
 import type { AuditEvent, AuditSink } from "./audit.js";
 
@@ -91,8 +92,8 @@ describe("gateway — basics", () => {
 describe("gateway — cost_cap (M1 acceptance)", () => {
   let h: Harness;
   beforeEach(() => {
-    // $0.002 per call, limit $0.005 → the first calls pass; once cost >= 0.005 → DENY
-    h = harness([P({ id: "cc", type: "cost_cap", params: { maxUsd: 0.005 } })]);
+    // preflight off here so this test covers accumulation only; preflight has its own block
+    h = harness([P({ id: "cc", type: "cost_cap", params: { maxUsd: 0.005, preflight: false } })]);
   });
 
   it("cost accumulates across calls and call N+1 is blocked", async () => {
@@ -118,7 +119,7 @@ describe("gateway — cost_cap (M1 acceptance)", () => {
   });
 
   it("error body is Anthropic-shaped on /v1/messages", async () => {
-    const app = harness([P({ id: "cc", type: "cost_cap", params: { maxUsd: 0 } })]).app;
+    const app = harness([P({ id: "cc", type: "cost_cap", params: { maxUsd: 0.000001 } })]).app;
     const res = await app.inject({
       method: "POST",
       url: "/v1/messages",
@@ -127,6 +128,28 @@ describe("gateway — cost_cap (M1 acceptance)", () => {
     });
     expect(res.statusCode).toBe(429);
     expect(res.json()).toMatchObject({ type: "error", error: { type: "rate_limit_error" } });
+  });
+});
+
+describe("gateway — cost_cap preflight", () => {
+  // The fake model is $1/Mtok both ways, and an unspecified max_tokens is assumed to
+  // be 4096 output tokens ≈ $0.0041 — so a cap below that must refuse up front.
+  it("refuses a call whose estimated cost alone would break the cap", async () => {
+    const h = harness([P({ id: "cc", type: "cost_cap", params: { maxUsd: 0.002 } })]);
+    const res = await post(h.app, "r1");
+    expect(res.statusCode).toBe(429);
+    expect((res.json() as { error: { message: string } }).error.message).toContain("estimated");
+    expect(h.calls).toHaveLength(0); // never reached the provider — no money spent
+  });
+
+  it("a smaller max_tokens brings the same call back under the cap", async () => {
+    const h = harness([P({ id: "cc", type: "cost_cap", params: { maxUsd: 0.002 } })]);
+    expect((await post(h.app, "r1", { max_tokens: 100 })).statusCode).toBe(200);
+  });
+
+  it("preflight can be switched off, and then only spent cost counts", async () => {
+    const h = harness([P({ id: "cc", type: "cost_cap", params: { maxUsd: 0.002, preflight: false } })]);
+    expect((await post(h.app, "r1")).statusCode).toBe(200);
   });
 });
 
@@ -187,13 +210,13 @@ describe("gateway — streaming", () => {
     const { app, store } = streamHarness([]);
     await post(app, "r1", { stream: true });
     await new Promise((r) => setImmediate(r)); // settle() runs after the stream ends
-    const s = await store.get("r1");
+    const s = await store.get(runKey(undefined, "r1"));
     expect(s.tokens).toBe(2000);
     expect(s.costUsd).toBeCloseTo(0.002, 6);
   });
 
   it("the breaker still blocks BEFORE the stream opens", async () => {
-    const { app } = streamHarness([P({ id: "cc", type: "cost_cap", params: { maxUsd: 0 } })]);
+    const { app } = streamHarness([P({ id: "cc", type: "cost_cap", params: { maxUsd: 0.000001 } })]);
     const res = await post(app, "r1", { stream: true });
     expect(res.statusCode).toBe(429);
   });
@@ -217,7 +240,7 @@ describe("gateway — fail mode & audit", () => {
   });
 
   it("every decision produces an audit event", async () => {
-    const h = harness([P({ id: "cc", type: "cost_cap", params: { maxUsd: 0.003 } })]);
+    const h = harness([P({ id: "cc", type: "cost_cap", params: { maxUsd: 0.003, preflight: false } })]);
     await post(h.app, "r1");
     await post(h.app, "r1");
     await post(h.app, "r1");
@@ -251,5 +274,110 @@ describe("gateway — throttle", () => {
     const second = await post(h.app, "r1");
     expect(second.statusCode).toBe(429);
     expect(second.headers["retry-after"]).toBe("60");
+  });
+});
+
+
+describe("gateway — authentication", () => {
+  const authed = (policies: Policy[] = []) =>
+    harness(policies, { authenticate: keyAuthenticator([{ key: "k-a", projectId: "proj-a" }]) });
+
+  const call = (app: FastifyInstance, headers: Record<string, string>) =>
+    app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      headers: { "content-type": "application/json", ...headers },
+      payload: { model: "fake-model", messages: [{ role: "user", content: "hi" }] },
+    });
+
+  it("accepts a key that arrives twice", async () => {
+    // why: callers routinely set x-curb-key by hand AND spread gatewayHeaders(), which
+    // sets it too. HTTP joins the repeats into "k-a, k-a" — a valid request that a naive
+    // string comparison would reject.
+    const h = authed();
+    const res = await call(h.app, { "x-curb-key": "k-a, k-a" });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("still refuses when only one of several values is junk", async () => {
+    const h = authed();
+    expect((await call(h.app, { "x-curb-key": "nope, also-nope" })).statusCode).toBe(401);
+  });
+
+  it("refuses a request with no key", async () => {
+    const h = authed();
+    const res = await call(h.app, {});
+    expect(res.statusCode).toBe(401);
+    expect(h.calls).toHaveLength(0); // nothing reached the provider
+  });
+
+  it("refuses a wrong key", async () => {
+    expect((await call(authed().app, { "x-curb-key": "nope" })).statusCode).toBe(401);
+  });
+
+  it("accepts a known key", async () => {
+    expect((await call(authed().app, { "x-curb-key": "k-a" })).statusCode).toBe(200);
+  });
+
+  it("health stays open so orchestrators can probe it", async () => {
+    expect((await authed().app.inject({ method: "GET", url: "/health" })).statusCode).toBe(200);
+  });
+
+  it("the project comes from the KEY, never from a caller-supplied header", async () => {
+    // why: the gateway used to trust X-Curb-Project off the wire, so an agent could
+    // escape any project-scoped policy simply by inventing a different project id.
+    // preflight makes this deny on the very first call, so the assertion is purely
+    // about which project the policy was matched against
+    const cap = P({ id: "cc", type: "cost_cap", scope: { project: "proj-a" },
+                    params: { maxUsd: 0.000001 } });
+    const h = authed([cap]);
+
+    const escaped = await call(h.app, { "x-curb-key": "k-a", "x-curb-project": "somewhere-else" });
+    expect(escaped.statusCode).toBe(429);
+    expect(escaped.headers["x-curb-policy"]).toBe("cc");
+  });
+
+  it("a policy scoped to another project does not apply", async () => {
+    const cap = P({ id: "cc", type: "cost_cap", scope: { project: "proj-b" }, params: { maxUsd: 0.000001 } });
+    expect((await call(authed([cap]).app, { "x-curb-key": "k-a" })).statusCode).toBe(200);
+  });
+
+  it("two projects reusing the same run id keep separate cost counters", async () => {
+    // run ids come from the client; without project scoping one tenant could
+    // exhaust — or read — another tenant's budget.
+    const store = new InMemoryRunStateStore(() => 0);
+    const up = makeUpstream();
+    const app = buildApp({
+      store,
+      loadPolicies: async () => [],
+      forward: up.forward,
+      prices: PRICES,
+      now: () => 1_000,
+      authenticate: keyAuthenticator([
+        { key: "k-a", projectId: "proj-a" },
+        { key: "k-b", projectId: "proj-b" },
+      ]),
+    });
+
+    const shared = { "x-curb-run-id": "same-run", "content-type": "application/json" };
+    await call(app, { ...shared, "x-curb-key": "k-a" });
+    const second = await call(app, { ...shared, "x-curb-key": "k-b" });
+
+    // proj-b's first call must start from zero, not inherit proj-a's spend
+    expect(Number(second.headers["x-curb-cost-usd"])).toBeCloseTo(0.002, 6);
+  });
+});
+
+describe("secretsMatch", () => {
+  it("matches identical secrets and rejects others", () => {
+    expect(secretsMatch("abc", "abc")).toBe(true);
+    expect(secretsMatch("abc", "abd")).toBe(false);
+  });
+
+  it("does not throw on different lengths", () => {
+    // timingSafeEqual throws on a length mismatch, and the throw itself would leak
+    // the real key's length — hashing first keeps the comparison fixed-width.
+    expect(() => secretsMatch("short", "a-much-longer-secret")).not.toThrow();
+    expect(secretsMatch("short", "a-much-longer-secret")).toBe(false);
   });
 });

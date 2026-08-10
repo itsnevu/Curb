@@ -80,6 +80,12 @@ jobs:
           fi
           echo "Postgres and Redis integration suites both ran, nothing skipped"
 
+      - name: Verify the documented example wiring
+        # why: examples/ needs provider keys to run for real, but the part that can
+        # actually break — guarded tool + gateway headers — is checked here against
+        # the fake provider, so the README's snippets cannot silently rot.
+        run: pnpm exec tsx scripts/verify-examples.ts
+
       - name: End-to-end demo
         env:
           CURB_DEMO_EXIT: "1"

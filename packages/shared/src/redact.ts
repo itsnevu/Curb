@@ -8,6 +8,11 @@ const MAX_STRING = 120;
  * A human needs enough context to decide ("delete WHICH file?"), but we must not
  * store secrets. Long values are truncated and suspicious keys are replaced with a
  * short hash.
+ *
+ * Lives in @curb/shared because the SDKs redact BEFORE sending: a secret that never
+ * leaves the agent process cannot leak from the control plane. The control plane
+ * redacts again on arrival — the operation is idempotent, and a third-party client
+ * may not have redacted at all.
  */
 export function digestArgs(args: unknown, depth = 0): Record<string, unknown> {
   const value = redact(args, depth);

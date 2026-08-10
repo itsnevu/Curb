@@ -104,7 +104,9 @@ function latestPerRun(events: z.infer<typeof EventSchema>[], projectId: string) 
       status: e.effect === "DENY" ? "blocked" : (prev?.status ?? "running"),
       totalTokens: Math.max(prev?.totalTokens ?? 0, e.tokensSnapshot ?? 0),
       totalCostUsd: Math.max(prev?.totalCostUsd ?? 0, e.costUsdSnapshot ?? 0),
-      stepCount: prev?.stepCount ?? 0,
+      // Each allowed llm_call is one step. Counting them here is what makes the Steps
+      // column on the dashboard reflect gateway traffic instead of sitting at zero.
+      stepCount: (prev?.stepCount ?? 0) + (e.kind === "llm_call" && e.effect === "ALLOW" ? 1 : 0),
       verdict: e.effect === "DENY" ? (e.policyId ?? prev?.verdict) : prev?.verdict,
     };
     map.set(e.runId, next);
