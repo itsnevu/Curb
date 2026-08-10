@@ -11,11 +11,14 @@ import type { PolicyEvaluator } from "./index.js";
  */
 export const loopDetect: PolicyEvaluator = (_ctx, policy, state) => {
   const maxRepeats = Number(policy.params.maxRepeats ?? 3);
+  const signatureWindow = Number(policy.params.signatureWindow ?? 10);
 
-  // 1) semantic repeat
-  const last = state.sigWindow.at(-1);
+  // 1) semantic repeat — hanya lihat `signatureWindow` call terakhir,
+  // why: run panjang yang sesekali mengulang pesan bukan loop.
+  const window = state.sigWindow.slice(-signatureWindow);
+  const last = window.at(-1);
   if (last) {
-    const repeats = state.sigWindow.filter((s) => s === last).length;
+    const repeats = window.filter((s) => s === last).length;
     if (repeats >= maxRepeats) {
       return {
         effect: "DENY",

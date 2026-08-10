@@ -30,9 +30,9 @@ export class Curb {
     const res = await fetch(`${this.base}/v1/decisions`, {
       method: "POST",
       headers: { "content-type": "application/json", "x-curb-key": this.opts.apiKey ?? "" },
-      body: JSON.stringify({ runId: this.opts.runId, ...ctx }),
+      body: JSON.stringify({ ...ctx, runId: ctx.runId ?? this.opts.runId }),
     });
-    return res.json();
+    return (await res.json()) as Decision & { approvalId?: string };
   }
 
   /** Bungkus tool sync/async; tahan/deny sesuai policy sebelum eksekusi. */
@@ -61,7 +61,7 @@ export class Curb {
     const poll = this.opts.pollMs ?? 1500;
     // TODO: timeout & webhook alih-alih polling terus.
     for (;;) {
-      const a = await (await fetch(`${this.base}/v1/approvals/${id}`)).json();
+      const a = (await (await fetch(`${this.base}/v1/approvals/${id}`)).json()) as { status?: string };
       if (a.status === "approved") return true;
       if (a.status === "denied") return false;
       await new Promise((r) => setTimeout(r, poll));

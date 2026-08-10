@@ -9,5 +9,10 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run"
   },
-  "dependencies": { "@curb/shared": "workspace:*" }
+  "dependencies": {
+    "@curb/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0"
+  }
 }

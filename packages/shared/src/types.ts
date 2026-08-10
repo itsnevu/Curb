@@ -49,6 +49,8 @@ export interface Context {
   toolName?: string;
   toolArgs?: unknown;
   sensitivity?: "low" | "medium" | "high";
+  /** Waktu evaluasi (ms epoch). Di-inject caller supaya engine tetap murni & deterministik di test. */
+  now?: number;
   meta?: Record<string, unknown>;
 }
 
@@ -74,9 +76,33 @@ export interface RunState {
   callTimestamps: number[];
 }
 
+/** Delta counter yang di-apply secara atomik setelah sebuah call selesai. */
+export interface RunStateDelta {
+  tokens?: number;
+  costUsd?: number;
+  steps?: number;
+}
+
+/** Window mana yang bisa di-push (semua bounded / capped). */
+export type WindowKey = "sigWindow" | "toolWindow" | "callTimestamps";
+
 export interface RunStateStore {
   get(runId: string): Promise<RunState>;
   save(state: RunState): Promise<void>;
+  /**
+   * Tambah counter secara atomik. Wajib atomik supaya beberapa instance
+   * gateway tidak saling menimpa cost/step (why: cost cap bocor kalau read-modify-write).
+   */
+  bump(runId: string, delta: RunStateDelta): Promise<RunState>;
+  /** Push ke window bounded, kembalikan isi window setelah push. */
+  pushWindow(
+    runId: string,
+    key: WindowKey,
+    value: string | number,
+    cap: number,
+  ): Promise<Array<string | number>>;
+  /** Hapus state run (dipakai test & saat run selesai). */
+  reset(runId: string): Promise<void>;
 }
 
 /** Urutan ketat: DENY > ASK > THROTTLE > ALLOW */
