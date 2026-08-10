@@ -1,0 +1,218 @@
+name: Release
+
+# Cutting a release is one action: push a tag.
+#
+#   npm version 0.1.0 --no-git-tag-version   # (or edit the package.json versions)
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# That publishes the two server images to GHCR, @curb/sdk + @curb/shared to npm, and
+# curb-sdk to PyPI. Every job re-runs the tests first: a release that was never green
+# is worse than no release.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish (without the leading v), e.g. 0.1.0"
+        required: true
+
+env:
+  VERSION: ${{ github.event.inputs.version || github.ref_name }}
+
+jobs:
+  # why a separate gate: the three publish jobs below are irreversible in different
+  # ways (npm cannot unpublish after 72h, PyPI never reuses a filename). None of them
+  # should start until the suite that guards them has passed on this exact commit.
+  verify:
+    name: Verify before publishing
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: curb
+          POSTGRES_PASSWORD: curb
+          POSTGRES_DB: curb
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U curb"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      DATABASE_URL: postgresql://curb:curb@localhost:5432/curb
+      REDIS_URL: redis://localhost:6379
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r build
+      - run: pnpm -r typecheck
+      - run: pnpm -r test
+
+      - name: Tag and package versions must agree
+        # why: a tag that says v0.2.0 while package.json says 0.1.0 publishes the wrong
+        # number to a registry that will not let you take it back.
+        run: |
+          v="${VERSION#v}"
+          for pkg in packages/sdk-ts packages/shared; do
+            got=$(node -p "require('./$pkg/package.json').version")
+            [ "$got" = "$v" ] || { echo "::error::$pkg is $got but the tag says $v"; exit 1; }
+          done
+          got=$(grep -m1 '^version' sdks/python/pyproject.toml | cut -d'"' -f2)
+          [ "$got" = "$v" ] || { echo "::error::python sdk is $got but the tag says $v"; exit 1; }
+          echo "all packages agree on $v"
+
+  images:
+    name: Publish images to GHCR
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - service: control-plane
+            dockerfile: apps/control-plane/Dockerfile
+          - service: gateway
+            dockerfile: apps/gateway/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/curb-${{ matrix.service }}
+          tags: |
+            type=semver,pattern={{version}},value=${{ env.VERSION }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ env.VERSION }}
+            type=raw,value=latest
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          # arm64 matters here: a lot of people evaluating this run Apple Silicon, and
+          # an amd64-only image emulates so slowly it reads as "the thing is broken".
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  smoke:
+    name: Smoke test the published images
+    needs: images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Boot the release compose file against the images we just pushed
+        run: |
+          v="${VERSION#v}"
+          echo "CURB_API_KEY=release-smoke-key" > .env
+          CURB_VERSION="$v" docker compose -f docker-compose.release.yml up -d
+
+      - name: Both services answer
+        run: |
+          for svc in "gateway 8080" "control-plane 8090"; do
+            set -- $svc
+            for i in $(seq 1 40); do
+              curl -fsS "http://localhost:$2/health" >/dev/null 2>&1 && { echo "$1 up"; break; }
+              [ "$i" = 40 ] && { echo "::error::$1 never became healthy"; docker compose -f docker-compose.release.yml logs "$1"; exit 1; }
+              sleep 3
+            done
+          done
+
+      - name: Auth is enforced and a policy is honoured
+        run: |
+          set -euo pipefail
+          KEY=release-smoke-key
+          test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8090/v1/policies)" = 401
+          curl -fsS -X POST localhost:8090/v1/policies -H "x-curb-key: $KEY" \
+            -H 'content-type: application/json' \
+            -d '{"name":"smoke","type":"tool_permission","action":"deny","scope":{},
+                 "enabled":true,"params":{"tools":["wipe_db"],"mode":"deny"}}' >/dev/null
+          effect=$(curl -fsS -X POST localhost:8090/v1/decisions -H "x-curb-key: $KEY" \
+            -H 'content-type: application/json' \
+            -d '{"kind":"tool_call","runId":"smoke","toolName":"wipe_db"}' \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["effect"])')
+          test "$effect" = DENY || { echo "::error::published image returned $effect"; exit 1; }
+          echo "published images are good"
+
+      - if: always()
+        run: docker compose -f docker-compose.release.yml down -v
+
+  npm:
+    name: Publish to npm
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # npm provenance
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r build
+
+      # Order matters: @curb/sdk depends on @curb/shared, and pnpm rewrites the
+      # `workspace:^` range to the real version as it packs.
+      - name: Publish @curb/shared then @curb/sdk
+        run: |
+          pnpm --filter @curb/shared publish --access public --no-git-checks --provenance
+          pnpm --filter @curb/sdk    publish --access public --no-git-checks --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  pypi:
+    name: Publish to PyPI
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # PyPI trusted publishing — no long-lived token to leak
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+
+      - name: Test before building
+        working-directory: sdks/python
+        run: |
+          pip install -e ".[dev]"
+          python -m pytest -q
+
+      - name: Build the wheel and sdist
+        working-directory: sdks/python
+        run: |
+          pip install build
+          python -m build
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: sdks/python/dist

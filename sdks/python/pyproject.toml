@@ -1,9 +1,27 @@
 [project]
 name = "curb-sdk"
-version = "0.0.1"
-description = "Curb SDK — guardrail & circuit breaker untuk AI agent (Python)"
+version = "0.1.0"
+description = "Curb SDK — cost/loop circuit breakers and ask-before-acting guardrails for AI agents"
+readme = "README.md"
 requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "itsnevu" }]
+keywords = ["ai", "agent", "guardrail", "circuit-breaker", "llm", "cost-control"]
 dependencies = ["httpx>=0.27", "pydantic>=2.7"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Libraries",
+]
+
+[project.urls]
+Homepage = "https://github.com/itsnevu/Curb"
+Repository = "https://github.com/itsnevu/Curb"
+Issues = "https://github.com/itsnevu/Curb/issues"
 
 [build-system]
 requires = ["hatchling"]

@@ -1,16 +1,23 @@
 {
   "name": "@curb/sdk",
-  "version": "0.0.1",
+  "version": "0.1.0",
+  "description": "Curb SDK — cost/loop circuit breakers and ask-before-acting guardrails for AI agents",
+  "keywords": ["ai", "agent", "guardrail", "circuit-breaker", "llm", "cost-control", "observability"],
+  "homepage": "https://github.com/itsnevu/Curb#readme",
+  "bugs": "https://github.com/itsnevu/Curb/issues",
+  "repository": { "type": "git", "url": "git+https://github.com/itsnevu/Curb.git", "directory": "packages/sdk-ts" },
+  "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "publishConfig": { "access": "public" },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run"
   },
   "dependencies": {
-    "@curb/shared": "workspace:*"
+    "@curb/shared": "workspace:^"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
@@ -23,6 +30,7 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md"
   ]
 }

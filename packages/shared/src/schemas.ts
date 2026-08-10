@@ -1,11 +1,19 @@
 import { z } from "zod";
 
-export const PolicyScopeSchema = z.object({
-  org: z.string().optional(),
-  project: z.string().optional(),
-  run: z.string().optional(),
-  tool: z.string().optional(),
-});
+/**
+ * Strict for the same reason params are: a scope key that is silently dropped turns a
+ * policy the author narrowed into a global one. `scope: {env: "prod"}` is the common
+ * mistake — environment is matched by `when`, not `scope` — and it used to widen a
+ * prod-only rule to every run without a word.
+ */
+export const PolicyScopeSchema = z
+  .object({
+    org: z.string().optional(),
+    project: z.string().optional(),
+    run: z.string().optional(),
+    tool: z.string().optional(),
+  })
+  .strict();
 
 /**
  * Per-type parameter rules. A policy whose params are wrong is worse than no policy:

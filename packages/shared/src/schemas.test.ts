@@ -22,6 +22,18 @@ describe("PolicySchema", () => {
   it("scope and when are optional", () => {
     expect(PolicySchema.safeParse({ ...valid, when: { env: "prod" } }).success).toBe(true);
   });
+  it("accepts every real scope dimension", () => {
+    const scope = { org: "o", project: "p", run: "r", tool: "t" };
+    expect(PolicySchema.safeParse({ ...valid, scope }).success).toBe(true);
+  });
+  it("rejects an unknown scope key instead of dropping it", () => {
+    // why: `env` belongs in `when`. Silently discarding it turned a prod-only policy
+    // into a global one — the exact failure the strict params schema exists to prevent.
+    expect(PolicySchema.safeParse({ ...valid, scope: { env: "prod" } }).success).toBe(false);
+  });
+  it("rejects a misspelled scope key", () => {
+    expect(PolicySchema.safeParse({ ...valid, scope: { tools: "delete_file" } }).success).toBe(false);
+  });
 });
 
 describe("DecisionSchema", () => {

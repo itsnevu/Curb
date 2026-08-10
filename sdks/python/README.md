@@ -3,8 +3,12 @@
 The enforcement point for **tool calls** — the thing a proxy fundamentally cannot do.
 
 ```bash
-pip install -e ".[dev]"
+pip install curb-sdk
 ```
+
+> You need a running Curb control plane for this to do anything. The fastest way:
+> `docker compose -f docker-compose.release.yml up -d` — see the
+> [quickstart](https://github.com/itsnevu/Curb#quickstart-60-seconds).
 
 ```python
 from curb import Curb, PolicyViolation

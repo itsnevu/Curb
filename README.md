@@ -79,6 +79,18 @@ The live dashboard is at the URL the demo prints (default <http://localhost:8090
 
 ### Full stack
 
+No clone needed — pull the released images:
+
+```bash
+curl -O https://raw.githubusercontent.com/itsnevu/Curb/main/docker-compose.release.yml
+CURB_API_KEY=pick-your-own docker compose -f docker-compose.release.yml up -d
+```
+
+Pin a release with `CURB_VERSION=0.1.0`; the default tracks `latest`. Images are
+published for both `linux/amd64` and `linux/arm64`.
+
+From a clone, to build the images from source instead:
+
 ```bash
 cp .env.example .env
 docker compose up          # postgres + redis + gateway + control-plane + dashboard
@@ -176,9 +188,13 @@ chunk, and breakers are still evaluated **before** the stream opens.
 
 ### 2. Guardrails (human approval before dangerous actions)
 
-> **Not on npm/PyPI yet.** Until the packages are published, use them from a clone:
-> `pnpm add @curb/sdk --workspace` inside this repo, or
-> `pip install -e ./sdks/python` for Python. Tracked in the [roadmap](#roadmap).
+```bash
+npm i @curb/sdk        # TypeScript
+pip install curb-sdk   # Python
+```
+
+> Available from the `v0.1.0` release onward. Working from a clone before then:
+> `pnpm add @curb/sdk --workspace`, or `pip install -e ./sdks/python`.
 
 **TypeScript**
 
@@ -505,7 +521,7 @@ upstream), and it is not multi-region or HA. The SDKs are not published to npm/P
 - [x] SDKs: TypeScript + Python with ask-before-acting
 - [x] Webhook / Slack alerts, Docker Compose, demo
 - [x] CI: build, typecheck, tests against real Postgres + Redis, and a Docker Compose smoke test
-- [ ] Publish `@curb/sdk` to npm and `curb-sdk` to PyPI
+- [x] Release automation: one tag publishes GHCR images, npm, and PyPI ([release.yml](.github/workflows/release.yml))
 - [ ] Per-org multi-tenancy and RBAC
 - [ ] More providers (Gemini, Bedrock, OpenAI-compatible gateways)
 - [ ] Multi-agent traffic control

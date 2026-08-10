@@ -1,11 +1,15 @@
 {
   "name": "@curb/policy-engine",
-  "version": "0.0.1",
+  "version": "0.1.0",
+  "description": "Curb's policy evaluation engine — internal to the gateway and control plane",
+  "license": "MIT",
+  "//": "Private for now: the servers that use it ship as Docker images, and agents talk to Curb over HTTP via @curb/sdk. Publishing this would commit us to its API.",
+  "private": true,
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run"
   },

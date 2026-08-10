@@ -1,10 +1,11 @@
 {
   "name": "@curb/control-plane",
   "version": "0.0.1",
+  "private": true,
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.build.json && mkdir -p dist/public dist/db && cp -R src/public/. dist/public/ && cp -R src/db/. dist/db/",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && mkdir -p dist/public dist/db && cp -R src/public/. dist/public/ && cp -R src/db/. dist/db/",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "start": "node dist/index.js",
     "test": "vitest run"

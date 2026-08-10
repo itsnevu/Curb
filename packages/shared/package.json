@@ -1,11 +1,17 @@
 {
   "name": "@curb/shared",
-  "version": "0.0.1",
+  "version": "0.1.0",
+  "description": "Shared wire types, policy schemas, and argument redaction for Curb",
+  "homepage": "https://github.com/itsnevu/Curb#readme",
+  "bugs": "https://github.com/itsnevu/Curb/issues",
+  "repository": { "type": "git", "url": "git+https://github.com/itsnevu/Curb.git", "directory": "packages/shared" },
+  "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "publishConfig": { "access": "public" },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run"
   },

@@ -1,0 +1,61 @@
+# Curb — released images, no clone required.
+#
+#   curl -O https://raw.githubusercontent.com/itsnevu/Curb/main/docker-compose.release.yml
+#   CURB_API_KEY=your-own-key docker compose -f docker-compose.release.yml up -d
+#
+# Pin a release with CURB_VERSION (e.g. CURB_VERSION=0.1.0); the default tracks latest.
+# Contributors who want to build from source should use docker-compose.yml instead.
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: curb
+      POSTGRES_PASSWORD: curb
+      POSTGRES_DB: curb
+    volumes: ["curb_pg:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U curb"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  control-plane:
+    image: ghcr.io/itsnevu/curb-control-plane:${CURB_VERSION:-latest}
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql://curb:curb@postgres:5432/curb
+      REDIS_URL: redis://redis:6379
+      CURB_API_KEY: ${CURB_API_KEY:-dev-key-change-me}
+      CURB_FAIL_MODE: ${CURB_FAIL_MODE:-closed}
+    ports: ["8090:8090"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  gateway:
+    image: ghcr.io/itsnevu/curb-gateway:${CURB_VERSION:-latest}
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      REDIS_URL: redis://redis:6379
+      CONTROL_PLANE_URL: http://control-plane:8090
+      CURB_API_KEY: ${CURB_API_KEY:-dev-key-change-me}
+      CURB_FAIL_MODE: ${CURB_FAIL_MODE:-closed}
+    ports: ["8080:8080"]
+    depends_on:
+      redis: { condition: service_healthy }
+      control-plane: { condition: service_healthy }
+
+volumes:
+  curb_pg:
