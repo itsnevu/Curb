@@ -1,6 +1,6 @@
 # Curb — Design & Product Spec
 
-> **Curb** (Yunani: *hukum/aturan*) — control plane keamanan untuk AI agent.
+> **Curb** — nama produk (codename awal: Nomos).
 > Nama ini codename/placeholder — gampang di-find-replace kalau mau ganti (kandidat lain: Curb, Rein, Governor).
 >
 > **Satu kalimat:** Curb adalah lapisan kontrol di antara agent kamu dan dunia luar (LLM API + tools), yang **mencegah agent kebablasan** — loop tak terbatas, ledakan biaya, dan aksi berbahaya — lewat satu *policy engine* terpusat.

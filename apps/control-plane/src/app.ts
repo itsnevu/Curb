@@ -5,6 +5,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 import type { RunStateStore } from "@curb/shared";
 import { ApprovalHub } from "./approval-hub.js";
 import { makeAuth } from "./auth.js";
+import { NULL_NOTIFIER, type Notifier } from "./notify.js";
 import type { Repo } from "./repo/types.js";
 import { registerApprovals } from "./routes/approvals.js";
 import { registerDecisions } from "./routes/decisions.js";
@@ -21,6 +22,7 @@ export interface ControlPlaneDeps {
   logger?: boolean;
   /** Dashboard butuh key untuk memanggil API-nya sendiri dari browser. */
   dashboardApiKey?: string;
+  notifier?: Notifier;
 }
 
 export function buildApp(deps: ControlPlaneDeps): FastifyInstance {
@@ -46,10 +48,11 @@ export function buildApp(deps: ControlPlaneDeps): FastifyInstance {
       store: deps.store,
       now,
       failMode: deps.failMode ?? "closed",
+      notifier: deps.notifier ?? NULL_NOTIFIER,
     });
     registerPolicies(api, deps.repo);
     registerApprovals(api, deps.repo, hub, now);
-    registerObservability(api, deps.repo);
+    registerObservability(api, deps.repo, deps.notifier ?? NULL_NOTIFIER);
   });
 
   app.decorate("approvalHub", hub);

@@ -3,8 +3,9 @@ import { z } from "zod";
 import type { FastifyInstance } from "fastify";
 import { evaluate } from "@curb/policy-engine";
 import type { Context, Decision, RunStateStore } from "@curb/shared";
-import type { Repo } from "../repo/types.js";
+import type { Approval, EventRecord, Repo } from "../repo/types.js";
 import { digestArgs } from "../redact.js";
+import type { Notifier } from "../notify.js";
 
 const DecisionRequestSchema = z.object({
   kind: z.enum(["llm_call", "tool_call", "step"]),
@@ -22,6 +23,7 @@ export interface DecisionDeps {
   store: RunStateStore;
   now: () => number;
   failMode: "open" | "closed";
+  notifier: Notifier;
 }
 
 export function registerDecisions(app: FastifyInstance, deps: DecisionDeps) {
@@ -60,7 +62,7 @@ export function registerDecisions(app: FastifyInstance, deps: DecisionDeps) {
     let approvalId: string | undefined;
     if (decision.effect === "ASK") {
       approvalId = `apr_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
-      await deps.repo.createApproval({
+      const approval: Approval = {
         id: approvalId,
         runId: input.runId,
         projectId,
@@ -71,21 +73,23 @@ export function registerDecisions(app: FastifyInstance, deps: DecisionDeps) {
         policyId: decision.policyId,
         status: "pending",
         requestedAt: t,
-      });
+      };
+      await deps.repo.createApproval(approval);
+      deps.notifier.approvalRequested(approval);
     }
 
-    await deps.repo.appendEvents([
-      {
-        runId: input.runId,
-        projectId,
-        ts: t,
-        kind: input.kind,
-        effect: decision.effect,
-        policyId: decision.policyId,
-        reason: decision.reason,
-        context: { toolName: input.toolName, model: input.model, sensitivity: input.sensitivity, approvalId },
-      },
-    ]);
+    const event: EventRecord = {
+      runId: input.runId,
+      projectId,
+      ts: t,
+      kind: input.kind,
+      effect: decision.effect,
+      policyId: decision.policyId,
+      reason: decision.reason,
+      context: { toolName: input.toolName, model: input.model, sensitivity: input.sensitivity, approvalId },
+    };
+    await deps.repo.appendEvents([event]);
+    deps.notifier.policyTripped(event);
 
     await deps.repo.upsertRun({
       id: input.runId,

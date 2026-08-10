@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { FastifyInstance } from "fastify";
-import type { Repo, RunSummary } from "../repo/types.js";
+import type { EventRecord, Repo, RunSummary } from "../repo/types.js";
+import { NULL_NOTIFIER, type Notifier } from "../notify.js";
 
 const EventSchema = z.object({
   runId: z.string().min(1),
@@ -21,7 +22,7 @@ const IngestSchema = z.object({
 });
 
 /** Penerimaan audit dari gateway/SDK, plus pembacaan run & event untuk dashboard. */
-export function registerObservability(app: FastifyInstance, repo: Repo) {
+export function registerObservability(app: FastifyInstance, repo: Repo, notifier: Notifier = NULL_NOTIFIER) {
   app.post("/v1/events", async (req, reply) => {
     const parsed = IngestSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -30,18 +31,18 @@ export function registerObservability(app: FastifyInstance, repo: Repo) {
     const projectId = req.project!.id;
     const events = parsed.data.events;
 
-    await repo.appendEvents(
-      events.map((e) => ({
-        runId: e.runId,
-        projectId,
-        ts: e.ts,
-        kind: e.kind,
-        effect: e.effect,
-        policyId: e.policyId,
-        reason: e.reason,
-        context: { model: e.model, costUsd: e.costUsdSnapshot, tokens: e.tokensSnapshot },
-      })),
-    );
+    const records: EventRecord[] = events.map((e) => ({
+      runId: e.runId,
+      projectId,
+      ts: e.ts,
+      kind: e.kind,
+      effect: e.effect,
+      policyId: e.policyId,
+      reason: e.reason,
+      context: { model: e.model, costUsd: e.costUsdSnapshot, tokens: e.tokensSnapshot },
+    }));
+    await repo.appendEvents(records);
+    for (const r of records) notifier.policyTripped(r);
 
     // Ringkasan run diperbarui dari event terakhir tiap run (angka snapshot
     // sudah kumulatif, jadi cukup ambil yang paling besar).

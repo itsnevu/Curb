@@ -1,0 +1,174 @@
+import { InMemoryRunStateStore } from "../packages/policy-engine/src/index.js";
+import { Curb, PolicyViolation } from "../packages/sdk-ts/src/index.js";
+import { buildApp as buildControlPlane } from "../apps/control-plane/src/app.js";
+import { hashApiKey } from "../apps/control-plane/src/auth.js";
+import { MemoryRepo } from "../apps/control-plane/src/repo/memory.js";
+import { buildApp as buildGateway } from "../apps/gateway/src/app.js";
+import { HttpAuditSink } from "../apps/gateway/src/audit.js";
+import { forwardUpstream } from "../apps/gateway/src/intercept.js";
+import { PolicySource } from "../apps/gateway/src/policy-source.js";
+import { startFakeProvider } from "./fake-provider.js";
+
+/**
+ * Demo 60 detik: satu proses menjalankan control-plane, gateway, provider palsu,
+ * dan tiga agent yang masing-masing memicu satu jenis perlindungan.
+ */
+const KEY = "demo-key";
+const c = {
+  judul: (s: string) => console.log(`\n\x1b[1m${s}\x1b[0m`),
+  ok: (s: string) => console.log(`  \x1b[32m✓\x1b[0m ${s}`),
+  blok: (s: string) => console.log(`  \x1b[31m⛔\x1b[0m ${s}`),
+  tanya: (s: string) => console.log(`  \x1b[33m✋\x1b[0m ${s}`),
+  info: (s: string) => console.log(`  \x1b[2m${s}\x1b[0m`),
+};
+
+async function main() {
+  const provider = await startFakeProvider();
+  process.env.OPENAI_UPSTREAM = provider.url;
+
+  const repo = new MemoryRepo();
+  await repo.upsertProject({ id: "demo", orgId: "demo", name: "demo", apiKeyHash: hashApiKey(KEY) });
+  const store = new InMemoryRunStateStore(() => Date.now());
+
+  const cp = buildControlPlane({ repo, store, dashboardApiKey: KEY });
+  await cp.listen({ port: Number(process.env.CONTROL_PLANE_PORT ?? 8090), host: "127.0.0.1" });
+  const cpUrl = addrOf(cp.server.address());
+
+  const audit = new HttpAuditSink(cpUrl, { apiKey: KEY, flushMs: 50 });
+  const gw = buildGateway({
+    store,
+    loadPolicies: () => new PolicySource({ controlPlaneUrl: cpUrl, apiKey: KEY, ttlMs: 200 }).load(),
+    forward: forwardUpstream,
+    audit: audit,
+  });
+  await gw.listen({ port: Number(process.env.GATEWAY_PORT ?? 8080), host: "127.0.0.1" });
+  const gwUrl = addrOf(gw.server.address());
+
+  console.log(`\n\x1b[1mCurb\x1b[0m — dashboard: \x1b[4m${cpUrl}\x1b[0m   gateway: ${gwUrl}   (api key: ${KEY})`);
+
+  await policy({ name: "cost cap $0.03/run", type: "cost_cap", action: "deny", params: { maxUsd: 0.03 } });
+  await policy({ name: "loop detect", type: "loop_detect", action: "deny", params: { maxRepeats: 3 } });
+  await policy({
+    name: "hapus file butuh izin", type: "tool_permission", action: "ask",
+    params: { tools: ["delete_file"], mode: "ask" },
+  });
+
+  async function policy(p: Record<string, unknown>) {
+    const res = await fetch(`${cpUrl}/v1/policies`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-curb-key": KEY },
+      body: JSON.stringify({ scope: {}, enabled: true, ...p }),
+    });
+    if (!res.ok) throw new Error(`gagal bikin policy: ${await res.text()}`);
+  }
+
+  const llm = async (runId: string, isi: string) => {
+    const res = await fetch(`${gwUrl}/v1/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-curb-run-id": runId, authorization: "Bearer sk-palsu" },
+      body: JSON.stringify({ model: "gpt-4o", messages: [{ role: "user", content: isi }] }),
+    });
+    return { status: res.status, cost: res.headers.get("x-curb-cost-usd"), body: await res.json() as any };
+  };
+
+  // ── A. Cost cap ────────────────────────────────────────────────────────
+  c.judul("A. Ledakan biaya — agent dihentikan saat melewati $0.03");
+  for (let i = 1; i <= 5; i++) {
+    const r = await llm("demo-cost", `analisis bagian ${i}`);
+    if (r.status === 200) c.ok(`call ${i} lewat — biaya kumulatif $${r.cost}`);
+    else {
+      c.blok(`call ${i} DITOLAK — ${r.body.error.message}`);
+      break;
+    }
+  }
+
+  // ── B. Loop breaker ────────────────────────────────────────────────────
+  c.judul("B. Loop tak terbatas — pesan identik berulang terdeteksi");
+  for (let i = 1; i <= 5; i++) {
+    const r = await llm("demo-loop", "pertanyaan yang sama persis");
+    if (r.status === 200) c.ok(`call ${i} lewat (pesan identik)`);
+    else {
+      c.blok(`call ${i} DITOLAK — ${r.body.error.message}`);
+      break;
+    }
+  }
+
+  // ── C. Ask-before-acting ───────────────────────────────────────────────
+  c.judul("C. Aksi berbahaya — ditahan sampai manusia memutuskan");
+  const curb = new Curb({ baseUrl: cpUrl, apiKey: KEY, approvalTimeoutMs: 15_000 });
+  const terhapus: string[] = [];
+  const deleteFile = curb.wrapTool(
+    async (path: string) => {
+      terhapus.push(path);
+      return `terhapus: ${path}`;
+    },
+    { name: "delete_file", sensitivity: "high" },
+  );
+
+  const agent = curb.run(async () => deleteFile("/data/produksi.db"), "demo-approval");
+  await tunggu(() => antrian(cpUrl).then((q) => q.length > 0));
+  const [menunggu] = await antrian(cpUrl);
+  c.tanya(`agent minta izin menjalankan '${menunggu.toolName}' — eksekusi DITAHAN`);
+  c.info(`file belum tersentuh: ${JSON.stringify(terhapus)}`);
+  c.info(`(di dunia nyata, operator klik Approve/Deny di ${cpUrl})`);
+
+  await new Promise((r) => setTimeout(r, 800));
+  await fetch(`${cpUrl}/v1/approvals/${menunggu.id}/decide`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-curb-key": KEY },
+    body: JSON.stringify({ approve: true, by: "operator-demo" }),
+  });
+  c.ok(`disetujui operator → ${await agent}`);
+
+  // ── C2. Penolakan ──────────────────────────────────────────────────────
+  const ditolak = curb.run(async () => deleteFile("/data/lebih-penting.db"), "demo-deny").catch((e) => e);
+  await tunggu(() => antrian(cpUrl).then((q) => q.length > 0));
+  const [kedua] = await antrian(cpUrl);
+  await fetch(`${cpUrl}/v1/approvals/${kedua.id}/decide`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-curb-key": KEY },
+    body: JSON.stringify({ approve: false, by: "operator-demo" }),
+  });
+  const err = await ditolak;
+  c.blok(`ditolak operator → ${err instanceof PolicyViolation ? err.message : err}`);
+  c.info(`file yang benar-benar terhapus: ${JSON.stringify(terhapus)}`);
+
+  await audit.flush(); // pastikan event gateway sudah sampai sebelum kita membaca statistik
+
+  // ── Ringkasan ──────────────────────────────────────────────────────────
+  const stats = await (await fetch(`${cpUrl}/v1/stats`, { headers: { "x-curb-key": KEY } })).json() as any;
+  c.judul("Ringkasan yang tercatat di control plane");
+  console.log(
+    `  run: ${stats.runs} · diblokir: ${stats.blocked} · keputusan DENY: ${stats.denied} · ` +
+      `minta izin: ${stats.asked} · total biaya: $${stats.totalCostUsd.toFixed(4)}`,
+  );
+  console.log(`\n  Dashboard live: \x1b[4m${cpUrl}\x1b[0m  (Ctrl+C untuk berhenti)\n`);
+
+  if (process.env.CURB_DEMO_EXIT === "1") {
+    await Promise.all([gw.close(), cp.close(), provider.close()]);
+  }
+}
+
+const antrian = async (cpUrl: string) =>
+  (await (await fetch(`${cpUrl}/v1/approvals?status=pending`, { headers: { "x-curb-key": KEY } })).json()) as Array<{
+    id: string;
+    toolName: string;
+  }>;
+
+async function tunggu(cond: () => Promise<boolean>, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await cond()) return;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  throw new Error("timeout menunggu kondisi");
+}
+
+function addrOf(addr: ReturnType<import("node:net").Server["address"]>) {
+  return `http://127.0.0.1:${typeof addr === "object" && addr ? addr.port : 0}`;
+}
+
+main().catch((err) => {
+  console.error("\ndemo gagal:", err);
+  process.exit(1);
+});

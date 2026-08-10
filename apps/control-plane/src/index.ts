@@ -3,6 +3,7 @@ import { InMemoryRunStateStore, RedisRunStateStore, type RedisLike } from "@curb
 import type { RunStateStore } from "@curb/shared";
 import { buildApp } from "./app.js";
 import { ensureDevProject } from "./auth.js";
+import { notifierFromEnv } from "./notify.js";
 import { MemoryRepo } from "./repo/memory.js";
 import { PostgresRepo } from "./repo/postgres.js";
 import type { Repo } from "./repo/types.js";
@@ -21,6 +22,7 @@ const app = buildApp({
   failMode: process.env.CURB_FAIL_MODE === "open" ? "open" : "closed",
   logger: true,
   dashboardApiKey: process.env.CURB_API_KEY,
+  notifier: notifierFromEnv({ onError: (err) => app.log.warn({ err }, "alert gagal terkirim") }),
 });
 
 const port = Number(process.env.CONTROL_PLANE_PORT ?? 8090);

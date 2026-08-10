@@ -7,22 +7,42 @@ services:
       POSTGRES_DB: curb
     ports: ["5432:5432"]
     volumes: ["curb_pg:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U curb"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
 
   redis:
     image: redis:7
     ports: ["6379:6379"]
-
-  gateway:
-    build: { context: ., dockerfile: apps/gateway/Dockerfile }
-    env_file: .env
-    ports: ["8080:8080"]
-    depends_on: [redis]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
 
   control-plane:
     build: { context: ., dockerfile: apps/control-plane/Dockerfile }
     env_file: .env
+    environment:
+      DATABASE_URL: postgresql://curb:curb@postgres:5432/curb
+      REDIS_URL: redis://redis:6379
     ports: ["8090:8090"]
-    depends_on: [postgres, redis]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  gateway:
+    build: { context: ., dockerfile: apps/gateway/Dockerfile }
+    env_file: .env
+    environment:
+      REDIS_URL: redis://redis:6379
+      CONTROL_PLANE_URL: http://control-plane:8090
+    ports: ["8080:8080"]
+    depends_on:
+      redis: { condition: service_healthy }
+      control-plane: { condition: service_started }
 
 volumes:
   curb_pg:

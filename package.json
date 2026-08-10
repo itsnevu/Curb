@@ -2,15 +2,16 @@
   "name": "curb",
   "private": true,
   "version": "0.0.1",
-  "description": "Curb — control plane keamanan untuk AI agent (cost/loop breaker + guardrail)",
+  "description": "Curb \u2014 control plane keamanan untuk AI agent (cost/loop breaker + guardrail)",
   "packageManager": "pnpm@9.0.0",
   "scripts": {
     "build": "pnpm -r build",
     "dev": "pnpm -r --parallel dev",
     "test": "pnpm -r test",
-    "typecheck": "pnpm -r typecheck",
+    "typecheck": "pnpm -r build && pnpm -r typecheck",
     "up": "docker compose up -d",
-    "down": "docker compose down"
+    "down": "docker compose down",
+    "demo": "tsx scripts/demo.ts"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
