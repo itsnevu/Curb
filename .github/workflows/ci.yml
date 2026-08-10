@@ -62,15 +62,23 @@ jobs:
         run: pnpm -r test
 
       - name: Assert the integration suites actually ran
-        # why: these suites skip themselves when the env vars are missing. Without this
-        # check, a broken service container would look like a green build.
+        # why: these suites skip themselves when their env var is missing, so a broken
+        # service container would otherwise look like a green build. vitest prints the
+        # file path for a passing file, and "skipped" whenever anything was skipped.
         run: |
-          out=$(pnpm --filter @curb/control-plane test 2>&1)
-          echo "$out"
-          echo "$out" | grep -q "PostgresRepo" \
+          set -o pipefail
+          pg=$(pnpm --filter @curb/control-plane test 2>&1 | tee /dev/stderr)
+          echo "$pg" | grep -q "postgres.test.ts" \
             || { echo "::error::Postgres suite did not run"; exit 1; }
-          echo "$out" | grep -qE "skipped \(" \
-            && { echo "::error::something is still being skipped"; exit 1; } || true
+
+          rd=$(pnpm --filter @curb/policy-engine test 2>&1 | tee /dev/stderr)
+          echo "$rd" | grep -q "redis-integration.test.ts" \
+            || { echo "::error::Redis suite did not run"; exit 1; }
+
+          if printf '%s\n%s' "$pg" "$rd" | grep -q "skipped"; then
+            echo "::error::a suite was skipped even though the services are up"; exit 1
+          fi
+          echo "Postgres and Redis integration suites both ran, nothing skipped"
 
       - name: End-to-end demo
         env:
