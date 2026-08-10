@@ -1,0 +1,19 @@
+{
+  "name": "@curb/gateway",
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "start": "node dist/index.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@curb/policy-engine": "workspace:*",
+    "@curb/shared": "workspace:*",
+    "fastify": "^4.28.0",
+    "ioredis": "^5.4.0",
+    "undici": "^6.19.0"
+  }
+}

@@ -1,0 +1,22 @@
+import type { PolicyEvaluator } from "./index.js";
+
+/**
+ * rate_limit — sliding window sederhana per run.
+ * params: { maxCalls: number, perMs: number }
+ * state.callTimestamps diisi caller (push now sebelum evaluate).
+ */
+export const rateLimit: PolicyEvaluator = (ctx, policy, state) => {
+  const maxCalls = Number(policy.params.maxCalls ?? Infinity);
+  const perMs = Number(policy.params.perMs ?? 60_000);
+  const now = Number(ctx.meta?.now ?? state.startedAt);
+  const recent = state.callTimestamps.filter((t) => now - t <= perMs);
+  if (recent.length > maxCalls) {
+    return {
+      effect: "THROTTLE",
+      policyId: policy.id,
+      reason: `rate_limit: ${recent.length} call / ${perMs}ms (batas ${maxCalls})`,
+      retryAfterMs: perMs,
+    };
+  }
+  return { effect: "ALLOW" };
+};
