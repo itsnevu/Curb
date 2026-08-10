@@ -1,0 +1,250 @@
+import { describe, it, expect, beforeEach } from "vitest";
+import type { FastifyInstance } from "fastify";
+import { InMemoryRunStateStore } from "@curb/policy-engine";
+import { buildApp } from "./app.js";
+import { hashApiKey } from "./auth.js";
+import { MemoryRepo } from "./repo/memory.js";
+
+const KEY = "kunci-test";
+const H = { "x-curb-key": KEY, "content-type": "application/json" };
+
+let app: FastifyInstance;
+let repo: MemoryRepo;
+
+beforeEach(async () => {
+  repo = new MemoryRepo();
+  await repo.upsertProject({ id: "proj1", orgId: "org1", name: "test", apiKeyHash: hashApiKey(KEY) });
+  app = buildApp({ repo, store: new InMemoryRunStateStore(() => 1_000), now: () => 1_000 });
+});
+
+const post = (url: string, payload: unknown, headers: Record<string, string> = H) =>
+  app.inject({ method: "POST", url, headers, payload: payload as object });
+const get = (url: string, headers: Record<string, string> = H) => app.inject({ method: "GET", url, headers });
+
+const policy = (over: Record<string, unknown> = {}) => ({
+  name: "test", type: "cost_cap", action: "deny", params: { maxUsd: 2 }, scope: {}, enabled: true, ...over,
+});
+
+describe("auth", () => {
+  it("menolak tanpa API key", async () => {
+    expect((await app.inject({ method: "GET", url: "/v1/policies" })).statusCode).toBe(401);
+  });
+  it("menolak API key salah", async () => {
+    expect((await get("/v1/policies", { "x-curb-key": "salah" })).statusCode).toBe(401);
+  });
+  it("menerima Bearer token", async () => {
+    expect((await get("/v1/policies", { authorization: `Bearer ${KEY}` })).statusCode).toBe(200);
+  });
+  it("health terbuka tanpa auth", async () => {
+    expect((await app.inject({ method: "GET", url: "/health" })).statusCode).toBe(200);
+  });
+  it("api key tidak pernah disimpan mentah", async () => {
+    const p = await repo.projectByApiKeyHash(hashApiKey(KEY));
+    expect(p!.apiKeyHash).not.toContain(KEY);
+    expect(p!.apiKeyHash).toHaveLength(64);
+  });
+});
+
+describe("policy CRUD", () => {
+  it("membuat policy dan langsung terbaca", async () => {
+    const created = await post("/v1/policies", policy());
+    expect(created.statusCode).toBe(201);
+    expect((created.json() as { id: string }).id).toMatch(/^pol_/);
+    expect((await get("/v1/policies")).json()).toHaveLength(1);
+  });
+  it("menolak policy tidak valid dengan 400", async () => {
+    const res = await post("/v1/policies", policy({ type: "tipe-ngaco" }));
+    expect(res.statusCode).toBe(400);
+  });
+  it("update mengubah enabled", async () => {
+    const id = (await post("/v1/policies", policy())).json().id;
+    await app.inject({ method: "PUT", url: `/v1/policies/${id}`, headers: H, payload: { enabled: false } });
+    expect((await get(`/v1/policies/${id}`)).json().enabled).toBe(false);
+  });
+  it("hapus policy", async () => {
+    const id = (await post("/v1/policies", policy())).json().id;
+    await app.inject({ method: "DELETE", url: `/v1/policies/${id}`, headers: H });
+    expect((await get("/v1/policies")).json()).toHaveLength(0);
+  });
+  it("404 untuk policy yang tidak ada", async () => {
+    expect((await get("/v1/policies/tidak-ada")).statusCode).toBe(404);
+  });
+});
+
+describe("Decision API (acceptance M2: policy via API langsung ditegakkan)", () => {
+  it("tool_permission mode deny → DENY", async () => {
+    await post("/v1/policies", policy({
+      type: "tool_permission", action: "deny", params: { tools: ["wipe_db"], mode: "deny" },
+    }));
+    const d = await post("/v1/decisions", { kind: "tool_call", runId: "r1", toolName: "wipe_db" });
+    expect(d.json()).toMatchObject({ effect: "DENY" });
+  });
+
+  it("tool yang tidak diatur tetap ALLOW", async () => {
+    await post("/v1/policies", policy({
+      type: "tool_permission", action: "deny", params: { tools: ["wipe_db"], mode: "deny" },
+    }));
+    const d = await post("/v1/decisions", { kind: "tool_call", runId: "r1", toolName: "read_file" });
+    expect(d.json().effect).toBe("ALLOW");
+  });
+
+  it("step_limit menghitung step lintas panggilan", async () => {
+    await post("/v1/policies", policy({ type: "step_limit", params: { maxSteps: 3 } }));
+    const effects = [];
+    for (let i = 0; i < 5; i++) {
+      effects.push((await post("/v1/decisions", { kind: "step", runId: "r1" })).json().effect);
+    }
+    expect(effects).toEqual(["ALLOW", "ALLOW", "ALLOW", "DENY", "DENY"]);
+  });
+
+  it("body tidak valid → 400", async () => {
+    expect((await post("/v1/decisions", { kind: "ngaco", runId: "r1" })).statusCode).toBe(400);
+  });
+
+  it("setiap keputusan tercatat sebagai event", async () => {
+    await post("/v1/decisions", { kind: "tool_call", runId: "r1", toolName: "baca" });
+    const events = (await get("/v1/events")).json();
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ runId: "r1", effect: "ALLOW", kind: "tool_call" });
+  });
+
+  it("run summary ikut terbentuk dari keputusan", async () => {
+    await post("/v1/decisions", { kind: "step", runId: "r1" });
+    const runs = (await get("/v1/runs")).json();
+    expect(runs[0]).toMatchObject({ id: "r1", projectId: "proj1" });
+  });
+});
+
+describe("approval flow end-to-end (acceptance M2)", () => {
+  beforeEach(async () => {
+    await post("/v1/policies", policy({
+      name: "hapus file butuh izin", type: "tool_permission", action: "ask",
+      params: { tools: ["delete_file"], mode: "ask" },
+    }));
+  });
+
+  const ask = () =>
+    post("/v1/decisions", { kind: "tool_call", runId: "r1", toolName: "delete_file", toolArgs: { path: "/tmp/a" } });
+
+  it("ASK membuat approval pending yang muncul di antrian", async () => {
+    const d = (await ask()).json();
+    expect(d.effect).toBe("ASK");
+    expect(d.approvalId).toMatch(/^apr_/);
+    const queue = (await get("/v1/approvals?status=pending")).json();
+    expect(queue).toHaveLength(1);
+    expect(queue[0]).toMatchObject({ toolName: "delete_file", status: "pending" });
+  });
+
+  it("approve membebaskan pemanggil yang sedang long-poll", async () => {
+    const { approvalId } = (await ask()).json();
+    // SDK menggantung menunggu keputusan...
+    const waiting = get(`/v1/approvals/${approvalId}?wait=5000`);
+    await new Promise((r) => setTimeout(r, 20));
+    // ...dashboard menekan Approve
+    await post(`/v1/approvals/${approvalId}/decide`, { approve: true, by: "budi" });
+    const resolved = (await waiting).json();
+    expect(resolved).toMatchObject({ status: "approved", decidedBy: "budi" });
+  });
+
+  it("deny juga membebaskan penunggu", async () => {
+    const { approvalId } = (await ask()).json();
+    const waiting = get(`/v1/approvals/${approvalId}?wait=5000`);
+    await new Promise((r) => setTimeout(r, 20));
+    await post(`/v1/approvals/${approvalId}/decide`, { approve: false });
+    expect((await waiting).json().status).toBe("denied");
+  });
+
+  it("long-poll yang timeout mengembalikan status pending, bukan error", async () => {
+    const { approvalId } = (await ask()).json();
+    const res = await get(`/v1/approvals/${approvalId}?wait=30`);
+    expect(res.statusCode).toBe(200);
+    expect(res.json().status).toBe("pending");
+  });
+
+  it("keputusan pertama menang, klik kedua tidak membalikkan", async () => {
+    const { approvalId } = (await ask()).json();
+    await post(`/v1/approvals/${approvalId}/decide`, { approve: true, by: "budi" });
+    const second = await post(`/v1/approvals/${approvalId}/decide`, { approve: false, by: "siti" });
+    expect(second.json()).toMatchObject({ status: "approved", decidedBy: "budi" });
+  });
+
+  it("argumen tool disimpan sudah diringkas, rahasia tidak bocor", async () => {
+    await post("/v1/decisions", {
+      kind: "tool_call", runId: "r2", toolName: "delete_file",
+      toolArgs: { path: "/etc/passwd", api_key: "sk-rahasia-banget" },
+    });
+    const queue = (await get("/v1/approvals")).json();
+    const args = JSON.stringify(queue[0].args);
+    expect(args).toContain("/etc/passwd"); // konteks untuk manusia tetap ada
+    expect(args).not.toContain("sk-rahasia-banget");
+    expect(args).toContain("sha256:");
+  });
+
+  it("approval milik project lain tidak terlihat", async () => {
+    const { approvalId } = (await ask()).json();
+    await repo.upsertProject({ id: "proj2", orgId: "org1", name: "lain", apiKeyHash: hashApiKey("kunci-lain") });
+    const res = await get(`/v1/approvals/${approvalId}`, { "x-curb-key": "kunci-lain" });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
+describe("ingest audit dari gateway", () => {
+  it("menerima batch dan meringkasnya jadi run", async () => {
+    const res = await post("/v1/events", {
+      events: [
+        { runId: "rg", ts: 1000, kind: "llm_call", effect: "ALLOW", costUsdSnapshot: 0.5, tokensSnapshot: 100 },
+        { runId: "rg", ts: 2000, kind: "llm_call", effect: "DENY", policyId: "cc", reason: "cost cap", costUsdSnapshot: 2.1, tokensSnapshot: 400 },
+      ],
+    });
+    expect(res.json()).toMatchObject({ ok: true, accepted: 2 });
+    const run = (await get("/v1/runs")).json()[0];
+    expect(run).toMatchObject({ id: "rg", status: "blocked", verdict: "cc" });
+    expect(run.totalCostUsd).toBeCloseTo(2.1, 6);
+  });
+
+  it("stats merangkum semuanya untuk dashboard", async () => {
+    await post("/v1/events", {
+      events: [{ runId: "rg", ts: 1000, kind: "llm_call", effect: "DENY", policyId: "cc", costUsdSnapshot: 3 }],
+    });
+    const s = (await get("/v1/stats")).json();
+    expect(s).toMatchObject({ runs: 1, blocked: 1, denied: 1 });
+    expect(s.totalCostUsd).toBeCloseTo(3, 6);
+  });
+
+  it("batch tidak valid ditolak 400", async () => {
+    expect((await post("/v1/events", { events: [{ runId: "x" }] })).statusCode).toBe(400);
+  });
+});
+
+describe("dashboard", () => {
+  it("dilayani di root tanpa auth", async () => {
+    const res = await app.inject({ method: "GET", url: "/" });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toContain("text/html");
+    expect(res.body).toContain("Antrian persetujuan");
+  });
+});
+
+describe("fail mode", () => {
+  it("fail-closed menolak saat repo policy error", async () => {
+    const broken = new MemoryRepo();
+    await broken.upsertProject({ id: "p", orgId: "o", name: "n", apiKeyHash: hashApiKey(KEY) });
+    broken.listPolicies = async () => {
+      throw new Error("db mati");
+    };
+    const a = buildApp({ repo: broken, store: new InMemoryRunStateStore(() => 0), now: () => 0 });
+    const res = await a.inject({ method: "POST", url: "/v1/decisions", headers: H, payload: { kind: "step", runId: "r" } });
+    expect(res.json()).toMatchObject({ effect: "DENY", policyId: "curb_fail_closed" });
+  });
+
+  it("fail-open tetap meloloskan", async () => {
+    const broken = new MemoryRepo();
+    await broken.upsertProject({ id: "p", orgId: "o", name: "n", apiKeyHash: hashApiKey(KEY) });
+    broken.listPolicies = async () => {
+      throw new Error("db mati");
+    };
+    const a = buildApp({ repo: broken, store: new InMemoryRunStateStore(() => 0), now: () => 0, failMode: "open" });
+    const res = await a.inject({ method: "POST", url: "/v1/decisions", headers: H, payload: { kind: "step", runId: "r" } });
+    expect(res.json().effect).toBe("ALLOW");
+  });
+});

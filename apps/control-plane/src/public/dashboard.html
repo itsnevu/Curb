@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Curb — control plane</title>
+<style>
+  :root {
+    --bg: #fbfbfa; --panel: #fff; --line: #e6e4e0; --ink: #1a1a18; --muted: #6b6862;
+    --accent: #2f6f4e; --deny: #b3261e; --ask: #a1660a; --throttle: #4a5a86; --allow: #3c7d5c;
+    --radius: 10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #17171a; --panel: #1f1f23; --line: #33333a; --ink: #ededf0; --muted: #9a9aa4;
+      --accent: #6cc39a; --deny: #f2837c; --ask: #e0b25f; --throttle: #9db0e6; --allow: #7fc7a3;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 ui-sans-serif, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; align-items: baseline; gap: 12px; padding: 18px 24px; border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 18px; margin: 0; letter-spacing: -0.01em; }
+  header .sub { color: var(--muted); font-size: 13px; }
+  header .dot { margin-left: auto; font-size: 12px; color: var(--muted); }
+  main { padding: 20px 24px 60px; max-width: 1180px; margin: 0 auto; display: grid; gap: 20px; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; }
+  .stat b { display: block; font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+  .stat span { color: var(--muted); font-size: 12px; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+  section > h2 { margin: 0; padding: 12px 16px; font-size: 13px; font-weight: 600; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 8px; }
+  section > h2 .count { color: var(--muted); font-weight: 400; }
+  .scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 9px 16px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  tr:last-child td { border-bottom: none; }
+  td.wrap { white-space: normal; max-width: 460px; }
+  .tag { display: inline-block; padding: 1px 7px; border-radius: 99px; font-size: 11px; font-weight: 600; border: 1px solid currentColor; }
+  .DENY { color: var(--deny); } .ASK { color: var(--ask); } .THROTTLE { color: var(--throttle); } .ALLOW { color: var(--allow); }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 6px; padding: 4px 12px; cursor: pointer; }
+  button:hover { border-color: var(--muted); }
+  button.ok { border-color: var(--accent); color: var(--accent); }
+  button.no { border-color: var(--deny); color: var(--deny); }
+  .empty { padding: 22px 16px; color: var(--muted); }
+  form.policy { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; padding: 14px 16px; align-items: end; }
+  label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+  input, select, textarea { font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); width: 100%; }
+  textarea { font-family: ui-monospace, Menlo, monospace; font-size: 12px; min-height: 34px; }
+  .err { color: var(--deny); padding: 0 16px 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Curb</h1>
+  <span class="sub">control plane keamanan untuk AI agent</span>
+  <span class="dot" id="pulse">menyambung…</span>
+</header>
+
+<main>
+  <div class="stats" id="stats"></div>
+
+  <section>
+    <h2>Antrian persetujuan <span class="count" id="aprCount"></span></h2>
+    <div class="scroll"><table>
+      <thead><tr><th>Waktu</th><th>Run</th><th>Tool</th><th>Alasan</th><th>Argumen</th><th></th></tr></thead>
+      <tbody id="approvals"></tbody>
+    </table></div>
+    <div class="empty" id="aprEmpty">Tidak ada yang menunggu persetujuan.</div>
+  </section>
+
+  <section>
+    <h2>Run berjalan <span class="count" id="runCount"></span></h2>
+    <div class="scroll"><table>
+      <thead><tr><th>Run</th><th>Status</th><th>Biaya</th><th>Token</th><th>Step</th><th>Verdict</th><th>Mulai</th></tr></thead>
+      <tbody id="runs"></tbody>
+    </table></div>
+    <div class="empty" id="runEmpty">Belum ada run.</div>
+  </section>
+
+  <section>
+    <h2>Event diblokir / ditanyakan</h2>
+    <div class="scroll"><table>
+      <thead><tr><th>Waktu</th><th>Efek</th><th>Run</th><th>Policy</th><th>Alasan</th></tr></thead>
+      <tbody id="events"></tbody>
+    </table></div>
+    <div class="empty" id="evEmpty">Belum ada event.</div>
+  </section>
+
+  <section>
+    <h2>Policy</h2>
+    <form class="policy" id="policyForm">
+      <label>Nama<input name="name" placeholder="cost cap $2/run" required /></label>
+      <label>Tipe<select name="type">
+        <option>cost_cap</option><option>loop_detect</option><option>step_limit</option>
+        <option>rate_limit</option><option>time_limit</option><option>tool_permission</option>
+      </select></label>
+      <label>Action<select name="action">
+        <option>deny</option><option>ask</option><option>throttle</option><option>allow</option>
+      </select></label>
+      <label>Params (JSON)<textarea name="params" spellcheck="false">{"maxUsd": 2}</textarea></label>
+      <button type="submit" class="ok">Tambah policy</button>
+    </form>
+    <div class="err" id="policyErr"></div>
+    <div class="scroll"><table>
+      <thead><tr><th>Nama</th><th>Tipe</th><th>Params</th><th>Action</th><th>Aktif</th><th></th></tr></thead>
+      <tbody id="policies"></tbody>
+    </table></div>
+  </section>
+</main>
+
+<script>
+const KEY = "__CURB_API_KEY__";
+const H = { "x-curb-key": KEY, "content-type": "application/json" };
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const usd = (n) => "$" + Number(n || 0).toFixed(4);
+const time = (ts) => ts ? new Date(ts).toLocaleTimeString("id-ID") : "—";
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, { headers: H, ...opts });
+  if (!res.ok) throw new Error((await res.text()).slice(0, 200));
+  return res.json();
+}
+
+function renderStats(s) {
+  const cards = [
+    ["Run", s.runs], ["Berjalan", s.running], ["Diblokir", s.blocked],
+    ["Total biaya", usd(s.totalCostUsd)], ["Token", (s.totalTokens || 0).toLocaleString("id-ID")],
+    ["Ditolak policy", s.denied], ["Menunggu approval", s.pendingApprovals],
+  ];
+  $("stats").innerHTML = cards.map(([k, v]) => `<div class="stat"><b>${esc(v)}</b><span>${k}</span></div>`).join("");
+}
+
+function renderApprovals(list) {
+  const pending = list.filter((a) => a.status === "pending");
+  $("aprCount").textContent = pending.length ? `${pending.length} menunggu` : "";
+  $("aprEmpty").style.display = pending.length ? "none" : "block";
+  $("approvals").innerHTML = pending.map((a) => `
+    <tr>
+      <td>${time(a.requestedAt)}</td>
+      <td class="mono">${esc((a.runId || "").slice(0, 12))}</td>
+      <td><b>${esc(a.toolName)}</b></td>
+      <td class="wrap">${esc(a.reason || "")}</td>
+      <td class="mono wrap">${esc(JSON.stringify(a.args || {}).slice(0, 160))}</td>
+      <td>
+        <button class="ok" data-approve="${esc(a.id)}">Approve</button>
+        <button class="no" data-deny="${esc(a.id)}">Deny</button>
+      </td>
+    </tr>`).join("");
+}
+
+function renderRuns(runs) {
+  $("runCount").textContent = runs.length ? `${runs.length} terakhir` : "";
+  $("runEmpty").style.display = runs.length ? "none" : "block";
+  $("runs").innerHTML = runs.map((r) => `
+    <tr>
+      <td class="mono">${esc((r.id || "").slice(0, 16))}</td>
+      <td><span class="tag ${r.status === "blocked" ? "DENY" : "ALLOW"}">${esc(r.status)}</span></td>
+      <td>${usd(r.totalCostUsd)}</td>
+      <td>${(r.totalTokens || 0).toLocaleString("id-ID")}</td>
+      <td>${r.stepCount || 0}</td>
+      <td class="mono">${esc(r.verdict || "—")}</td>
+      <td>${time(r.startedAt)}</td>
+    </tr>`).join("");
+}
+
+function renderEvents(events) {
+  const notable = events.filter((e) => e.effect !== "ALLOW").slice(0, 40);
+  $("evEmpty").style.display = notable.length ? "none" : "block";
+  $("events").innerHTML = notable.map((e) => `
+    <tr>
+      <td>${time(e.ts)}</td>
+      <td><span class="tag ${esc(e.effect)}">${esc(e.effect)}</span></td>
+      <td class="mono">${esc((e.runId || "").slice(0, 12))}</td>
+      <td class="mono">${esc(e.policyId || "—")}</td>
+      <td class="wrap">${esc(e.reason || "")}</td>
+    </tr>`).join("");
+}
+
+function renderPolicies(list) {
+  $("policies").innerHTML = list.map((p) => `
+    <tr>
+      <td>${esc(p.name)}</td>
+      <td class="mono">${esc(p.type)}</td>
+      <td class="mono wrap">${esc(JSON.stringify(p.params))}</td>
+      <td>${esc(p.action)}</td>
+      <td>${p.enabled ? "ya" : "tidak"}</td>
+      <td>
+        <button data-toggle="${esc(p.id)}" data-enabled="${p.enabled}">${p.enabled ? "Matikan" : "Nyalakan"}</button>
+        <button class="no" data-del="${esc(p.id)}">Hapus</button>
+      </td>
+    </tr>`).join("");
+}
+
+async function refresh() {
+  try {
+    const [stats, approvals, runs, events, policies] = await Promise.all([
+      api("/v1/stats"), api("/v1/approvals"), api("/v1/runs?limit=25"),
+      api("/v1/events?limit=200"), api("/v1/policies"),
+    ]);
+    renderStats(stats); renderApprovals(approvals); renderRuns(runs);
+    renderEvents(events); renderPolicies(policies);
+    $("pulse").textContent = "tersambung · " + new Date().toLocaleTimeString("id-ID");
+  } catch (err) {
+    $("pulse").textContent = "gagal memuat: " + err.message;
+  }
+}
+
+document.addEventListener("click", async (ev) => {
+  const t = ev.target;
+  const approve = t.dataset?.approve, deny = t.dataset?.deny;
+  const del = t.dataset?.del, toggle = t.dataset?.toggle;
+  try {
+    if (approve || deny) {
+      t.disabled = true;
+      await api(`/v1/approvals/${approve || deny}/decide`, {
+        method: "POST", body: JSON.stringify({ approve: Boolean(approve), by: "dashboard" }),
+      });
+    } else if (del) {
+      await api(`/v1/policies/${del}`, { method: "DELETE" });
+    } else if (toggle) {
+      await api(`/v1/policies/${toggle}`, {
+        method: "PUT", body: JSON.stringify({ enabled: t.dataset.enabled !== "true" }),
+      });
+    } else return;
+    await refresh();
+  } catch (err) {
+    $("pulse").textContent = "aksi gagal: " + err.message;
+  }
+});
+
+$("policyForm").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const f = new FormData(ev.target);
+  $("policyErr").textContent = "";
+  try {
+    await api("/v1/policies", {
+      method: "POST",
+      body: JSON.stringify({
+        name: f.get("name"), type: f.get("type"), action: f.get("action"),
+        params: JSON.parse(f.get("params") || "{}"), scope: {}, enabled: true,
+      }),
+    });
+    ev.target.reset();
+    await refresh();
+  } catch (err) {
+    $("policyErr").textContent = "Gagal menyimpan policy: " + err.message;
+  }
+});
+
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>

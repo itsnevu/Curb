@@ -1,55 +1,47 @@
-import Fastify from "fastify";
-import { evaluate, InMemoryRunStateStore } from "@curb/policy-engine";
-import { PolicySchema, type Context, type Policy } from "@curb/shared";
+import { Redis } from "ioredis";
+import { InMemoryRunStateStore, RedisRunStateStore, type RedisLike } from "@curb/policy-engine";
+import type { RunStateStore } from "@curb/shared";
+import { buildApp } from "./app.js";
+import { ensureDevProject } from "./auth.js";
+import { MemoryRepo } from "./repo/memory.js";
+import { PostgresRepo } from "./repo/postgres.js";
+import type { Repo } from "./repo/types.js";
 
-// TODO(M2): ganti in-memory dengan Postgres (policies, events, approvals, runs).
-const policies = new Map<string, Policy>();
-const approvals = new Map<string, { id: string; runId: string; tool: string; status: "pending" | "approved" | "denied" }>();
-const store = new InMemoryRunStateStore(() => Date.now());
+const repo: Repo = process.env.DATABASE_URL
+  ? new PostgresRepo(process.env.DATABASE_URL)
+  : new MemoryRepo();
 
-const app = Fastify({ logger: true });
+const store: RunStateStore = process.env.REDIS_URL
+  ? new RedisRunStateStore(new Redis(process.env.REDIS_URL) as unknown as RedisLike)
+  : new InMemoryRunStateStore(() => Date.now());
 
-// Decision API — dipanggil SDK untuk tool_call / step.
-app.post("/v1/decisions", async (req) => {
-  const ctx = req.body as Context;
-  const state = await store.get(ctx.runId);
-  if (ctx.kind === "tool_call" && ctx.toolName) {
-    state.toolWindow = [...state.toolWindow, ctx.toolName].slice(-12);
-  }
-  if (ctx.kind === "step") state.stepCount += 1;
-  await store.save(state);
-  const decision = evaluate(ctx, [...policies.values()], state);
-
-  // Kalau ASK, buat approval pending.
-  if (decision.effect === "ASK") {
-    const id = "apr_" + Math.random().toString(36).slice(2, 10);
-    approvals.set(id, { id, runId: ctx.runId, tool: ctx.toolName ?? "?", status: "pending" });
-    return { ...decision, approvalId: id };
-  }
-  return decision;
+const app = buildApp({
+  repo,
+  store,
+  failMode: process.env.CURB_FAIL_MODE === "open" ? "open" : "closed",
+  logger: true,
+  dashboardApiKey: process.env.CURB_API_KEY,
 });
-
-// CRUD policy
-app.get("/v1/policies", async () => [...policies.values()]);
-app.post("/v1/policies", async (req, reply) => {
-  const parsed = PolicySchema.safeParse(req.body);
-  if (!parsed.success) return reply.code(400).send(parsed.error.format());
-  policies.set(parsed.data.id, parsed.data);
-  return parsed.data;
-});
-app.delete("/v1/policies/:id", async (req: any) => { policies.delete(req.params.id); return { ok: true }; });
-
-// Approval flow (human-in-the-loop)
-app.get("/v1/approvals", async () => [...approvals.values()]);
-app.get("/v1/approvals/:id", async (req: any) => approvals.get(req.params.id) ?? { status: "unknown" });
-app.post("/v1/approvals/:id/decide", async (req: any) => {
-  const a = approvals.get(req.params.id);
-  if (!a) return { ok: false };
-  a.status = req.body?.approve ? "approved" : "denied";
-  return a;
-});
-
-app.get("/health", async () => ({ ok: true }));
 
 const port = Number(process.env.CONTROL_PLANE_PORT ?? 8090);
-app.listen({ port, host: "0.0.0.0" }).then(() => app.log.info(`curb control-plane :${port}`));
+
+async function main() {
+  await repo.init();
+  await ensureDevProject(repo, process.env.CURB_API_KEY);
+  await app.listen({ port, host: "0.0.0.0" });
+  app.log.info(
+    { port, db: process.env.DATABASE_URL ? "postgres" : "memory", state: process.env.REDIS_URL ? "redis" : "memory" },
+    "curb control-plane siap",
+  );
+}
+
+main().catch((err) => {
+  app.log.error({ err }, "control-plane gagal start");
+  process.exit(1);
+});
+
+for (const sig of ["SIGINT", "SIGTERM"] as const) {
+  process.on(sig, () => {
+    void app.close().then(() => repo.close()).then(() => process.exit(0));
+  });
+}

@@ -46,11 +46,12 @@ describe("loop_detect", () => {
 
 describe("step_limit", () => {
   const p = P({ type: "step_limit", params: { maxSteps: 5 } });
-  it("DENY saat step >= maxSteps", () => {
-    expect(evaluate(ctx({ kind: "step" }), [p], state({ stepCount: 5 })).effect).toBe("DENY");
+  // stepCount sudah termasuk step yang sedang dievaluasi
+  it("ALLOW pada step ke-maxSteps", () => {
+    expect(evaluate(ctx({ kind: "step" }), [p], state({ stepCount: 5 })).effect).toBe("ALLOW");
   });
-  it("ALLOW di bawah batas", () => {
-    expect(evaluate(ctx({ kind: "step" }), [p], state({ stepCount: 4 })).effect).toBe("ALLOW");
+  it("DENY pada step berikutnya", () => {
+    expect(evaluate(ctx({ kind: "step" }), [p], state({ stepCount: 6 })).effect).toBe("DENY");
   });
 });
 
