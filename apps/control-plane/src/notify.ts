@@ -13,14 +13,14 @@ export interface NotifyOptions {
   dashboardUrl?: string;
   fetch?: typeof fetch;
   onError?: (err: unknown) => void;
-  /** Jangan kirim event yang sama berulang dalam jendela ini. */
+  /** Suppress repeats of the same event within this window. */
   dedupeMs?: number;
   now?: () => number;
 }
 
 /**
- * Kirim alert saat breaker nyala atau ada yang menunggu persetujuan.
- * Selalu fire-and-forget: alert yang gagal tidak boleh menggagalkan keputusan policy.
+ * Sends alerts when a breaker trips or something is waiting for approval.
+ * Always fire-and-forget: a failed alert must never fail a policy decision.
  */
 export class HttpNotifier implements Notifier {
   private lastSent = new Map<string, number>();
@@ -29,7 +29,7 @@ export class HttpNotifier implements Notifier {
 
   policyTripped(event: EventRecord): void {
     if (event.effect !== "DENY" && event.effect !== "THROTTLE") return;
-    // why: satu run yang nyangkut bisa memicu ratusan DENY — jangan banjiri Slack.
+    // why: one stuck run can produce hundreds of DENYs — don't flood Slack.
     if (!this.allow(`${event.runId}:${event.policyId}`)) return;
 
     const title = event.effect === "DENY" ? "🛑 Curb blocked a run" : "🐢 Curb throttled a run";

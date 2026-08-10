@@ -4,10 +4,10 @@ const SECRET_KEYS = /pass|secret|token|key|auth|credential|cookie|session/i;
 const MAX_STRING = 120;
 
 /**
- * Ringkas argumen tool untuk ditampilkan di antrian approval.
- * Manusia butuh cukup konteks untuk memutuskan ("hapus file APA?"), tapi
- * kita tidak boleh menyimpan rahasia. Nilai panjang dipotong, key yang
- * mencurigakan diganti hash pendek.
+ * Summarise tool arguments for display in the approval queue.
+ * A human needs enough context to decide ("delete WHICH file?"), but we must not
+ * store secrets. Long values are truncated and suspicious keys are replaced with a
+ * short hash.
  */
 export function digestArgs(args: unknown, depth = 0): Record<string, unknown> {
   const value = redact(args, depth);
@@ -39,7 +39,7 @@ function truncate(s: string): string {
   return s.length <= MAX_STRING ? s : `${s.slice(0, MAX_STRING)}… (${s.length} char)`;
 }
 
-/** Cukup untuk membandingkan dua nilai tanpa mengungkapkannya. */
+/** Enough to compare two values without revealing either of them. */
 export function fingerprint(value: unknown): string {
   const s = typeof value === "string" ? value : JSON.stringify(value ?? null);
   return `sha256:${createHash("sha256").update(s).digest("hex").slice(0, 12)}`;

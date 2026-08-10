@@ -6,19 +6,19 @@ const valid = {
 };
 
 describe("parsePolicies", () => {
-  it("menerima array polos", () => {
+  it("accepts a plain array", () => {
     expect(parsePolicies([valid])).toHaveLength(1);
   });
-  it("menerima bentuk { policies: [...] }", () => {
+  it("accepts the { policies: [...] } shape", () => {
     expect(parsePolicies({ policies: [valid] })).toHaveLength(1);
   });
-  it("membuang policy tidak valid, menyimpan sisanya", () => {
-    // why: satu policy rusak tidak boleh mematikan seluruh penegakan
-    const out = parsePolicies([valid, { id: "x" }, { ...valid, id: "p2", type: "tipe_ngaco" }]);
+  it("drops invalid policies and keeps the rest", () => {
+    // why: one broken policy must not disable enforcement entirely
+    const out = parsePolicies([valid, { id: "x" }, { ...valid, id: "p2", type: "bogus_type" }]);
     expect(out.map((p) => p.id)).toEqual(["p1"]);
   });
-  it("body kosong/aneh → tidak melempar", () => {
+  it("empty or odd bodies → does not throw", () => {
     expect(parsePolicies(null)).toEqual([]);
-    expect(parsePolicies("bukan json")).toEqual([]);
+    expect(parsePolicies("not-json")).toEqual([]);
   });
 });

@@ -6,31 +6,31 @@ const valid = {
 };
 
 describe("PolicySchema", () => {
-  it("menerima policy yang benar", () => {
+  it("accepts a valid policy", () => {
     expect(PolicySchema.safeParse(valid).success).toBe(true);
   });
-  it("menolak type di luar daftar", () => {
+  it("rejects a type outside the list", () => {
     expect(PolicySchema.safeParse({ ...valid, type: "ngaco" }).success).toBe(false);
   });
-  it("menolak action di luar daftar", () => {
+  it("rejects an action outside the list", () => {
     expect(PolicySchema.safeParse({ ...valid, action: "mungkin" }).success).toBe(false);
   });
-  it("menolak field wajib yang hilang", () => {
+  it("rejects a missing required field", () => {
     const { enabled, ...tanpaEnabled } = valid;
     expect(PolicySchema.safeParse(tanpaEnabled).success).toBe(false);
   });
-  it("scope & when opsional", () => {
+  it("scope and when are optional", () => {
     expect(PolicySchema.safeParse({ ...valid, when: { env: "prod" } }).success).toBe(true);
   });
 });
 
 describe("DecisionSchema", () => {
-  it("menerima keempat effect", () => {
+  it("accepts all four effects", () => {
     for (const effect of ["ALLOW", "DENY", "ASK", "THROTTLE"]) {
       expect(DecisionSchema.safeParse({ effect }).success).toBe(true);
     }
   });
-  it("menolak effect huruf kecil", () => {
+  it("rejects a lowercase effect", () => {
     expect(DecisionSchema.safeParse({ effect: "deny" }).success).toBe(false);
   });
 });

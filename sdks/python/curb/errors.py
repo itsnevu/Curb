@@ -1,11 +1,11 @@
-"""Kesalahan yang dilempar Curb SDK."""
+"""Errors raised by the Curb SDK."""
 from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
 
 class PolicyViolation(Exception):
-    """Dilempar saat policy menolak sebuah aksi."""
+    """Raised when a policy denies an action."""
 
     def __init__(self, decision: Dict[str, Any], tool_name: Optional[str] = None) -> None:
         self.decision = decision
@@ -15,7 +15,7 @@ class PolicyViolation(Exception):
 
 
 class ApprovalTimeout(PolicyViolation):
-    """Approval tidak diputuskan sampai batas waktu."""
+    """No approval decision arrived before the deadline."""
 
     def __init__(self, approval_id: str, waited_ms: int, tool_name: Optional[str] = None) -> None:
         super().__init__(

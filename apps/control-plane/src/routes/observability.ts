@@ -21,7 +21,7 @@ const IngestSchema = z.object({
   dropped: z.number().optional(),
 });
 
-/** Penerimaan audit dari gateway/SDK, plus pembacaan run & event untuk dashboard. */
+/** Audit ingest from the gateway and SDKs, plus run/event reads for the dashboard. */
 export function registerObservability(app: FastifyInstance, repo: Repo, notifier: Notifier = NULL_NOTIFIER) {
   app.post("/v1/events", async (req, reply) => {
     const parsed = IngestSchema.safeParse(req.body);
@@ -44,8 +44,8 @@ export function registerObservability(app: FastifyInstance, repo: Repo, notifier
     await repo.appendEvents(records);
     for (const r of records) notifier.policyTripped(r);
 
-    // Ringkasan run diperbarui dari event terakhir tiap run (angka snapshot
-    // sudah kumulatif, jadi cukup ambil yang paling besar).
+    // Run summaries are refreshed from each run's latest event; snapshot numbers are
+    // already cumulative, so taking the maximum is enough.
     for (const [runId, latest] of latestPerRun(events, projectId)) {
       await repo.upsertRun({ ...latest, id: runId });
     }
@@ -73,7 +73,7 @@ export function registerObservability(app: FastifyInstance, repo: Repo, notifier
     return repo.listEvents(req.project!.id, { runId, limit: Math.min(Number(limit ?? 100) || 100, 500) });
   });
 
-  /** Angka ringkas untuk kartu di dashboard. */
+  /** Summary numbers for the dashboard cards. */
   app.get("/v1/stats", async (req) => {
     const projectId = req.project!.id;
     const [runs, events, pending] = await Promise.all([

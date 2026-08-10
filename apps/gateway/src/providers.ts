@@ -8,16 +8,16 @@ export interface Usage {
 
 export const ZERO_USAGE: Usage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
 
-/** Header milik Curb — tidak boleh bocor ke provider. */
+/** Curb's own headers — these must never leak upstream to the provider. */
 export const CURB_HEADERS = ["x-curb-run-id", "x-curb-key", "x-curb-project", "x-curb-provider"];
 
-/** Header hop-by-hop / yang harus dihitung ulang oleh undici. */
+/** Hop-by-hop headers, plus ones undici must recompute itself. */
 const STRIPPED = ["host", "content-length", "connection", "transfer-encoding", "accept-encoding"];
 
 export function detectProvider(path: string, headers: Record<string, unknown>): Provider {
   const hinted = headers["x-curb-provider"];
   if (hinted === "anthropic" || hinted === "openai") return hinted;
-  // why: Anthropic Messages API pakai /v1/messages, OpenAI pakai /v1/chat/completions.
+  // why: the Anthropic Messages API uses /v1/messages, OpenAI uses /v1/chat/completions.
   if (path.includes("/messages")) return "anthropic";
   if (headers["x-api-key"] && !headers["authorization"]) return "anthropic";
   return "openai";
@@ -40,7 +40,7 @@ export function sanitizeHeaders(headers: Record<string, unknown>): Record<string
   return out;
 }
 
-/** Ekstrak usage dari response non-streaming kedua provider. */
+/** Extract usage from a non-streaming response of either provider. */
 export function extractUsage(json: unknown): Usage {
   const u = (json as { usage?: Record<string, number> } | null)?.usage;
   if (!u) return ZERO_USAGE;
@@ -53,12 +53,12 @@ export function extractUsage(json: unknown): Usage {
   };
 }
 
-/** Pesan yang dipakai untuk signature loop-detect — bentuknya beda per provider. */
+/** The messages used for the loop-detection signature — the shape differs per provider. */
 export function messagesOf(body: Record<string, unknown> | undefined): unknown[] {
   if (!body) return [];
   const msgs = Array.isArray(body.messages) ? body.messages : [];
-  // Anthropic menaruh system prompt di luar messages; ikut dihitung supaya
-  // dua run dengan system berbeda tidak dianggap loop yang sama.
+  // Anthropic keeps the system prompt outside `messages`; include it so two runs
+  // with different system prompts aren't treated as the same loop.
   return body.system ? [{ role: "system", content: body.system }, ...msgs] : msgs;
 }
 
@@ -67,10 +67,10 @@ export function isStreaming(body: Record<string, unknown> | undefined): boolean 
 }
 
 /**
- * Akumulator usage dari SSE. Provider mengirim usage di chunk terakhir:
- * - OpenAI: chunk dengan `usage` (butuh stream_options.include_usage)
- * - Anthropic: `message_start` (input) lalu `message_delta` (output)
- * Aman dipanggil per potongan byte sembarang — buffer sampai baris utuh.
+ * Accumulates usage from an SSE stream. Providers send usage in the final chunks:
+ * - OpenAI: a chunk carrying `usage` (requires stream_options.include_usage)
+ * - Anthropic: `message_start` (input) then `message_delta` (output)
+ * Safe to feed arbitrary byte slices — it buffers until a line is complete.
  */
 export class StreamUsageAccumulator {
   private buf = "";
@@ -79,7 +79,7 @@ export class StreamUsageAccumulator {
   push(chunk: string): void {
     this.buf += chunk;
     const lines = this.buf.split("\n");
-    this.buf = lines.pop() ?? ""; // sisa baris belum utuh
+    this.buf = lines.pop() ?? ""; // trailing partial line
     for (const line of lines) this.consumeLine(line.trim());
   }
 
@@ -91,13 +91,13 @@ export class StreamUsageAccumulator {
     try {
       evt = JSON.parse(payload);
     } catch {
-      return; // chunk bukan JSON — abaikan, jangan jatuhkan stream
+      return; // not JSON — ignore it rather than killing the stream
     }
     const direct = extractUsage(evt);
     const nested = extractUsage((evt as { message?: unknown }).message);
     for (const u of [direct, nested]) {
-      // Anthropic mengirim usage kumulatif per event; ambil nilai TERBESAR
-      // supaya tidak dobel-hitung, sedangkan OpenAI hanya mengirim sekali.
+      // Anthropic sends cumulative usage per event, so take the LARGEST value to
+      // avoid double counting; OpenAI sends it only once, where max() is a no-op.
       this.usage.promptTokens = Math.max(this.usage.promptTokens, u.promptTokens);
       this.usage.completionTokens = Math.max(this.usage.completionTokens, u.completionTokens);
     }

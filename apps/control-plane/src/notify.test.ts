@@ -21,7 +21,7 @@ const approval: Approval = {
 };
 
 describe("HttpNotifier", () => {
-  it("mengirim ke webhook dan Slack saat breaker nyala", async () => {
+  it("posts to the webhook and Slack when a breaker trips", async () => {
     const s = spy();
     new HttpNotifier({ webhookUrl: "http://wh", slackWebhookUrl: "http://slack", fetch: s.doFetch })
       .policyTripped(event());
@@ -32,14 +32,14 @@ describe("HttpNotifier", () => {
     expect(String(s.calls[1].body.text)).toContain("blocked");
   });
 
-  it("event ALLOW tidak memicu alert", async () => {
+  it("an ALLOW event triggers no alert", async () => {
     const s = spy();
     new HttpNotifier({ webhookUrl: "http://wh", fetch: s.doFetch }).policyTripped(event({ effect: "ALLOW" }));
     await new Promise((r) => setImmediate(r));
     expect(s.calls).toHaveLength(0);
   });
 
-  it("DENY berulang pada run+policy yang sama hanya dikirim sekali per jendela", async () => {
+  it("repeated DENYs for the same run+policy are sent once per window", async () => {
     const s = spy();
     let t = 0;
     const n = new HttpNotifier({ webhookUrl: "http://wh", fetch: s.doFetch, dedupeMs: 1000, now: () => t });
@@ -51,7 +51,7 @@ describe("HttpNotifier", () => {
     expect(s.calls).toHaveLength(2);
   });
 
-  it("policy berbeda tetap dikirim terpisah", async () => {
+  it("different policies are still sent separately", async () => {
     const s = spy();
     const n = new HttpNotifier({ webhookUrl: "http://wh", fetch: s.doFetch, now: () => 0 });
     n.policyTripped(event({ policyId: "cc" }));
@@ -60,7 +60,7 @@ describe("HttpNotifier", () => {
     expect(s.calls).toHaveLength(2);
   });
 
-  it("approval memuat tautan dashboard", async () => {
+  it("the approval alert carries a dashboard link", async () => {
     const s = spy();
     new HttpNotifier({ slackWebhookUrl: "http://slack", dashboardUrl: "http://dash", fetch: s.doFetch })
       .approvalRequested(approval);
@@ -70,7 +70,7 @@ describe("HttpNotifier", () => {
     expect(text).toContain("http://dash");
   });
 
-  it("alert yang gagal tidak melempar ke pemanggil", async () => {
+  it("a failed alert does not throw to the caller", async () => {
     const failing = (async () => {
       throw new Error("slack mati");
     }) as unknown as typeof fetch;
@@ -81,7 +81,7 @@ describe("HttpNotifier", () => {
     expect(errors).toHaveLength(1);
   });
 
-  it("tanpa URL yang dikonfigurasi tidak ada request sama sekali", async () => {
+  it("with no configured URL there are no requests at all", async () => {
     const s = spy();
     new HttpNotifier({ fetch: s.doFetch }).policyTripped(event());
     await new Promise((r) => setImmediate(r));

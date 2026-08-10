@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-/** Signature stabil dari messages (buang field volatile) untuk loop detection. */
+/** A stable signature of the messages (volatile fields dropped) used for loop detection. */
 export function signatureOf(messages: unknown): string {
   if (!Array.isArray(messages)) return "none";
   const norm = messages.map((m: any) => ({ role: m?.role, content: typeof m?.content === "string" ? m.content : JSON.stringify(m?.content) }));

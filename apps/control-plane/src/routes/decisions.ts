@@ -36,7 +36,7 @@ export function registerDecisions(app: FastifyInstance, deps: DecisionDeps) {
     const input = parsed.data;
     const t = deps.now();
 
-    // Window & counter di-update sebelum evaluate supaya call ini ikut terhitung.
+    // Windows and counters are updated before evaluate so this call is counted too.
     if (input.kind === "tool_call" && input.toolName) {
       await deps.store.pushWindow(input.runId, "toolWindow", input.toolName, 24);
     }
@@ -67,7 +67,7 @@ export function registerDecisions(app: FastifyInstance, deps: DecisionDeps) {
         runId: input.runId,
         projectId,
         toolName: input.toolName ?? "unknown",
-        // why: argumen tool bisa berisi rahasia — simpan ringkasannya saja.
+        // why: tool arguments can contain secrets — store only a redacted summary.
         args: digestArgs(input.toolArgs),
         reason: decision.reason,
         policyId: decision.policyId,

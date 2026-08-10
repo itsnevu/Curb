@@ -1,4 +1,4 @@
-// ── Tipe inti Curb. Dipakai bersama oleh engine, gateway, control-plane, sdk. ──
+// ── Core Curb types. Shared by the engine, gateway, control plane and SDKs. ──
 
 export type PolicyType =
   | "cost_cap"
@@ -15,10 +15,10 @@ export interface PolicyScope {
   org?: string;
   project?: string;
   run?: string;
-  tool?: string; // untuk tool_permission
+  tool?: string; // for tool_permission
 }
 
-/** Kondisi opsional tambahan, mis. { env: "prod" }. Dievaluasi terhadap ctx.meta. */
+/** Optional extra condition, e.g. { env: "prod" }. Evaluated against ctx.meta. */
 export type Condition = Record<string, unknown>;
 
 export interface Policy {
@@ -32,7 +32,7 @@ export interface Policy {
   enabled: boolean;
 }
 
-/** Apa yang sedang dievaluasi. */
+/** What is being evaluated. */
 export type ContextKind = "llm_call" | "tool_call" | "step";
 
 export interface Context {
@@ -49,7 +49,7 @@ export interface Context {
   toolName?: string;
   toolArgs?: unknown;
   sensitivity?: "low" | "medium" | "high";
-  /** Waktu evaluasi (ms epoch). Di-inject caller supaya engine tetap murni & deterministik di test. */
+  /** Evaluation time (epoch ms). Injected by the caller so the engine stays pure and tests stay deterministic. */
   now?: number;
   meta?: Record<string, unknown>;
 }
@@ -61,51 +61,52 @@ export interface Decision {
   retryAfterMs?: number;
 }
 
-/** State per-run (Redis / in-memory). Ephemeral. */
+/** Per-run state (Redis / in-memory). Ephemeral. */
 export interface RunState {
   runId: string;
   startedAt: number;
   tokens: number;
   costUsd: number;
   stepCount: number;
-  /** signature pesan LLM terakhir (untuk loop detect) */
+  /** signatures of recent LLM messages (for loop detection) */
   sigWindow: string[];
-  /** urutan nama tool terakhir (untuk tool-cycle detect) */
+  /** recent tool names in order (for tool-cycle detection) */
   toolWindow: string[];
-  /** timestamp call terakhir per window key (untuk rate limit) */
+  /** timestamps of recent calls (for rate limiting) */
   callTimestamps: number[];
 }
 
-/** Delta counter yang di-apply secara atomik setelah sebuah call selesai. */
+/** Counter delta applied atomically once a call completes. */
 export interface RunStateDelta {
   tokens?: number;
   costUsd?: number;
   steps?: number;
 }
 
-/** Window mana yang bisa di-push (semua bounded / capped). */
+/** Which windows can be pushed to (all bounded / capped). */
 export type WindowKey = "sigWindow" | "toolWindow" | "callTimestamps";
 
 export interface RunStateStore {
   get(runId: string): Promise<RunState>;
   save(state: RunState): Promise<void>;
   /**
-   * Tambah counter secara atomik. Wajib atomik supaya beberapa instance
-   * gateway tidak saling menimpa cost/step (why: cost cap bocor kalau read-modify-write).
+   * Increment counters atomically. This must be atomic so that multiple gateway
+   * instances don't overwrite each other's cost/step counts — a read-modify-write
+   * here is exactly how a cost cap leaks.
    */
   bump(runId: string, delta: RunStateDelta): Promise<RunState>;
-  /** Push ke window bounded, kembalikan isi window setelah push. */
+  /** Push onto a bounded window; returns the window contents after the push. */
   pushWindow(
     runId: string,
     key: WindowKey,
     value: string | number,
     cap: number,
   ): Promise<Array<string | number>>;
-  /** Hapus state run (dipakai test & saat run selesai). */
+  /** Drop a run's state (used by tests and when a run finishes). */
   reset(runId: string): Promise<void>;
 }
 
-/** Urutan ketat: DENY > ASK > THROTTLE > ALLOW */
+/** Strictness order: DENY > ASK > THROTTLE > ALLOW */
 export const EFFECT_SEVERITY: Record<Effect, number> = {
   DENY: 3,
   ASK: 2,

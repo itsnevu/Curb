@@ -3,8 +3,8 @@ import { Curb, PolicyViolation, ApprovalTimeout, currentRunId } from "./index.js
 import type { DecisionResponse } from "./client.js";
 
 /**
- * Control plane palsu: kita kendalikan keputusan & waktu approval,
- * supaya bisa menguji perilaku menunggu tanpa server sungguhan.
+ * A fake control plane: we control the decision and the approval timing so the
+ * waiting behaviour can be tested without a real server.
  */
 function fakeServer(opts: {
   decision: DecisionResponse | ((ctx: Record<string, unknown>) => DecisionResponse);
@@ -24,7 +24,7 @@ function fakeServer(opts: {
     if (u.includes("/v1/approvals/")) {
       return jsonRes({ id: "apr_1", status: opts.approvalStatus?.() ?? "pending" });
     }
-    throw new Error(`url tak terduga: ${u}`);
+    throw new Error(`unexpected url: ${u}`);
   }) as unknown as typeof fetch;
   return { doFetch, seen };
 }
@@ -35,11 +35,11 @@ const jsonRes = (body: unknown) =>
 const curbWith = (server: ReturnType<typeof fakeServer>, over = {}) =>
   new Curb({ fetch: server.doFetch, apiKey: "k", ...over });
 
-describe("run() & propagasi runId", () => {
-  it("membuat runId dan menyebarkannya ke tool di dalamnya", async () => {
+describe("run() and runId propagation", () => {
+  it("creates a runId and propagates it to tools inside", async () => {
     const server = fakeServer({ decision: { effect: "ALLOW" } });
     const curb = curbWith(server);
-    const tool = curb.wrapTool(async () => "hasil", { name: "baca" });
+    const tool = curb.wrapTool(async () => "result", { name: "read" });
 
     const runId = await curb.run(async (id) => {
       await tool();
@@ -50,20 +50,20 @@ describe("run() & propagasi runId", () => {
     expect(server.seen[0].runId).toBe(runId);
   });
 
-  it("runId bisa ditentukan sendiri", async () => {
+  it("a runId can be supplied explicitly", async () => {
     const server = fakeServer({ decision: { effect: "ALLOW" } });
     const curb = curbWith(server);
-    await curb.run(async () => curb.wrapTool(async () => 1, { name: "t" })(), "run-saya");
-    expect(server.seen[0].runId).toBe("run-saya");
+    await curb.run(async () => curb.wrapTool(async () => 1, { name: "t" })(), "run-mine");
+    expect(server.seen[0].runId).toBe("run-mine");
   });
 
-  it("gatewayHeaders membawa runId aktif ke gateway", async () => {
+  it("gatewayHeaders carries the active runId to the gateway", async () => {
     const curb = curbWith(fakeServer({ decision: { effect: "ALLOW" } }));
     const headers = await curb.run(async () => curb.gatewayHeaders(), "run-x");
     expect(headers).toEqual({ "X-Curb-Run-Id": "run-x" });
   });
 
-  it("dua run paralel tidak tertukar runId-nya", async () => {
+  it("two parallel runs do not swap runIds", async () => {
     const server = fakeServer({ decision: { effect: "ALLOW" } });
     const curb = curbWith(server);
     const tool = curb.wrapTool(async () => currentRunId(), { name: "t" });
@@ -76,14 +76,14 @@ describe("run() & propagasi runId", () => {
 });
 
 describe("wrapTool", () => {
-  it("ALLOW → tool benar-benar dijalankan dengan argumen aslinya", async () => {
+  it("ALLOW → the tool really runs, with its original arguments", async () => {
     const curb = curbWith(fakeServer({ decision: { effect: "ALLOW" } }));
     const fn = vi.fn(async (a: number, b: number) => a + b);
-    expect(await curb.wrapTool(fn, { name: "tambah" })(2, 3)).toBe(5);
+    expect(await curb.wrapTool(fn, { name: "add" })(2, 3)).toBe(5);
     expect(fn).toHaveBeenCalledWith(2, 3);
   });
 
-  it("DENY → PolicyViolation dan tool TIDAK dijalankan", async () => {
+  it("DENY → PolicyViolation and the tool does NOT run", async () => {
     const server = fakeServer({ decision: { effect: "DENY", policyId: "tp", reason: "dilarang" } });
     const fn = vi.fn(async () => "boom");
     const tool = curbWith(server).wrapTool(fn, { name: "wipe_db" });
@@ -93,44 +93,44 @@ describe("wrapTool", () => {
     expect(fn).not.toHaveBeenCalled();
   });
 
-  it("PolicyViolation membawa policyId & nama tool", async () => {
+  it("PolicyViolation carries policyId and tool name", async () => {
     const server = fakeServer({ decision: { effect: "DENY", policyId: "tp" } });
     const err = await curbWith(server).wrapTool(async () => 1, { name: "wipe_db" })().catch((e) => e);
     expect(err).toMatchObject({ policyId: "tp", toolName: "wipe_db" });
   });
 
-  it("mengirim sensitivity dan nama tool ke Decision API", async () => {
+  it("sends sensitivity and tool name to the Decision API", async () => {
     const server = fakeServer({ decision: { effect: "ALLOW" } });
     await curbWith(server).wrapTool(async () => 1, { name: "delete_file", sensitivity: "high" })();
     expect(server.seen[0]).toMatchObject({ kind: "tool_call", toolName: "delete_file", sensitivity: "high" });
   });
 
-  it("wrapTools membungkus banyak tool sekaligus", async () => {
+  it("wrapTools guards several tools at once", async () => {
     const server = fakeServer({ decision: { effect: "ALLOW" } });
-    const tools = curbWith(server).wrapTools({ baca: async () => "a", tulis: async () => "b" }, { sensitivity: "high" });
-    await tools.baca();
-    await tools.tulis();
-    expect(server.seen.map((c) => c.toolName)).toEqual(["baca", "tulis"]);
+    const tools = curbWith(server).wrapTools({ read: async () => "a", write: async () => "b" }, { sensitivity: "high" });
+    await tools.read();
+    await tools.write();
+    expect(server.seen.map((c) => c.toolName)).toEqual(["read", "write"]);
   });
 });
 
 describe("ask-before-acting", () => {
-  it("menunggu, lalu jalan setelah disetujui", async () => {
+  it("waits, then runs once approved", async () => {
     let status: "pending" | "approved" = "pending";
     const server = fakeServer({
-      decision: { effect: "ASK", approvalId: "apr_1", reason: "butuh izin" },
+      decision: { effect: "ASK", approvalId: "apr_1", reason: "needs permission" },
       approvalStatus: () => status,
     });
-    const fn = vi.fn(async () => "terhapus");
+    const fn = vi.fn(async () => "deleted");
     const tool = curbWith(server, { approvalTimeoutMs: 2_000 }).wrapTool(fn, { name: "delete_file" });
 
     const pending = tool();
-    expect(fn).not.toHaveBeenCalled(); // masih ditahan
+    expect(fn).not.toHaveBeenCalled(); // still held
     setTimeout(() => { status = "approved"; }, 30);
-    expect(await pending).toBe("terhapus");
+    expect(await pending).toBe("deleted");
   });
 
-  it("ditolak manusia → PolicyViolation", async () => {
+  it("denied by a human → PolicyViolation", async () => {
     const server = fakeServer({
       decision: { effect: "ASK", approvalId: "apr_1" },
       approvalStatus: () => "denied",
@@ -140,7 +140,7 @@ describe("ask-before-acting", () => {
     expect(fn).not.toHaveBeenCalled();
   });
 
-  it("timeout approval → ApprovalTimeout (fail-closed)", async () => {
+  it("approval timeout → ApprovalTimeout (fail-closed)", async () => {
     const server = fakeServer({
       decision: { effect: "ASK", approvalId: "apr_1" },
       approvalStatus: () => "pending",
@@ -149,39 +149,39 @@ describe("ask-before-acting", () => {
     await expect(tool()).rejects.toThrow(ApprovalTimeout);
   });
 
-  it("timeout approval dengan failMode open → tetap jalan", async () => {
+  it("approval timeout with failMode open → still runs", async () => {
     const server = fakeServer({
       decision: { effect: "ASK", approvalId: "apr_1" },
       approvalStatus: () => "pending",
     });
     const tool = curbWith(server, { approvalTimeoutMs: 60, failMode: "open" })
-      .wrapTool(async () => "jalan", { name: "delete_file" });
-    expect(await tool()).toBe("jalan");
+      .wrapTool(async () => "ran", { name: "delete_file" });
+    expect(await tool()).toBe("ran");
   });
 
-  it("ASK tanpa approvalId dianggap DENY, bukan lolos diam-diam", async () => {
+  it("ASK without an approvalId counts as DENY, not a silent pass", async () => {
     const server = fakeServer({ decision: { effect: "ASK" } });
     await expect(curbWith(server).wrapTool(async () => 1, { name: "t" })()).rejects.toThrow(PolicyViolation);
   });
 });
 
-describe("fail mode saat control plane mati", () => {
-  it("fail-closed (default) → tool ditolak", async () => {
+describe("fail mode when the control plane is down", () => {
+  it("fail-closed (default) → the tool is denied", async () => {
     const server = fakeServer({ decision: { effect: "ALLOW" }, failDecide: true });
     const fn = vi.fn();
     await expect(curbWith(server).wrapTool(fn, { name: "t" })()).rejects.toThrow(/unreachable/);
     expect(fn).not.toHaveBeenCalled();
   });
 
-  it("fail-open → tool tetap jalan", async () => {
+  it("fail-open → the tool still runs", async () => {
     const server = fakeServer({ decision: { effect: "ALLOW" }, failDecide: true });
-    const tool = curbWith(server, { failMode: "open" }).wrapTool(async () => "jalan", { name: "t" });
-    expect(await tool()).toBe("jalan");
+    const tool = curbWith(server, { failMode: "open" }).wrapTool(async () => "ran", { name: "t" });
+    expect(await tool()).toBe("ran");
   });
 });
 
 describe("step()", () => {
-  it("melaporkan step dan melempar saat step_limit tercapai", async () => {
+  it("reports steps and throws once step_limit is reached", async () => {
     let n = 0;
     const server = fakeServer({ decision: () => (++n > 2 ? { effect: "DENY", reason: "step_limit" } : { effect: "ALLOW" }) });
     const curb = curbWith(server);
@@ -190,7 +190,7 @@ describe("step()", () => {
     await expect(curb.step()).rejects.toThrow("step_limit");
   });
 
-  it("onDecision dipanggil untuk tiap keputusan", async () => {
+  it("onDecision is called for every decision", async () => {
     const seen: string[] = [];
     const server = fakeServer({ decision: { effect: "ALLOW" } });
     const curb = curbWith(server, { onDecision: (d: DecisionResponse) => seen.push(d.effect) });

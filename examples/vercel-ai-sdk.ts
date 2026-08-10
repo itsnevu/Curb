@@ -1,5 +1,5 @@
 /**
- * Vercel AI SDK + Curb — cost/loop lewat gateway, guardrail lewat SDK.
+ * Vercel AI SDK + Curb — cost/loops via the gateway, guardrails via the SDK.
  * npm i ai @ai-sdk/openai @curb/sdk
  */
 import { openai, createOpenAI } from "@ai-sdk/openai";
@@ -10,26 +10,27 @@ import { Curb } from "@curb/sdk";
 const curb = new Curb({ baseUrl: "http://localhost:8090", apiKey: process.env.CURB_API_KEY });
 
 await curb.run(async () => {
-  // 1) Arahkan base URL ke gateway → cost cap & loop detect otomatis, tanpa ubah logika.
+  // 1) Point the base URL at the gateway → automatic cost cap and loop detection,
+  //    with no change to your agent logic.
   const model = createOpenAI({
     baseURL: "http://localhost:8080/v1",
-    headers: curb.gatewayHeaders(), // menempelkan X-Curb-Run-Id
+    headers: curb.gatewayHeaders(), // attaches X-Curb-Run-Id
   })("gpt-4o");
 
-  // 2) Bungkus tool berbahaya → ASK/DENY sebelum dieksekusi.
-  const hapus = curb.wrapTool(async ({ path }: { path: string }) => `terhapus ${path}`, {
+  // 2) Wrap the dangerous tool → ASK/DENY before it executes.
+  const remove = curb.wrapTool(async ({ path }: { path: string }) => `deleted ${path}`, {
     name: "delete_file",
     sensitivity: "high",
   });
 
   const { text } = await generateText({
     model,
-    prompt: "Bersihkan file sementara di /tmp lalu laporkan.",
+    prompt: "Clean up temporary files in /tmp and report back.",
     tools: {
       delete_file: tool({
-        description: "Hapus sebuah file",
+        description: "Delete a file",
         parameters: z.object({ path: z.string() }),
-        execute: hapus, // ← eksekusi ditahan sampai disetujui manusia
+        execute: remove, // ← execution is held until a human approves
       }),
     },
     maxSteps: 5,

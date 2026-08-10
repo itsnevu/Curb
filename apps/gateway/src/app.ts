@@ -38,7 +38,7 @@ export interface GatewayDeps {
   audit?: AuditSink;
   prices?: PriceTable;
   failMode?: "open" | "closed";
-  /** Batas tunggu THROTTLE sebelum ditolak saja. */
+  /** How long a THROTTLE may block before we reject the request instead. */
   maxThrottleMs?: number;
   now?: () => number;
   logger?: boolean;
@@ -63,7 +63,7 @@ export function buildApp(deps: GatewayDeps): FastifyInstance {
     const streaming = isStreaming(body);
     const t = now();
 
-    // Window di-update SEBELUM evaluate: policy melihat call ini termasuk hitungan.
+    // Windows are updated BEFORE evaluate, so policies count the current call too.
     const [sigWindow, callTimestamps] = await Promise.all([
       deps.store.pushWindow(runId, "sigWindow", signatureOf(messagesOf(body)), 20),
       deps.store.pushWindow(runId, "callTimestamps", t, 200),
@@ -160,7 +160,7 @@ async function safePolicies(deps: GatewayDeps): Promise<Policy[]> {
   }
 }
 
-/** Terapkan usage ke state setelah call sukses. */
+/** Apply usage to the run state after a successful call. */
 async function settle(
   deps: GatewayDeps,
   runId: string,
@@ -175,7 +175,7 @@ async function settle(
   });
 }
 
-/** Teruskan stream apa adanya sambil menghitung usage dari SSE. */
+/** Pass the stream through untouched while metering usage from the SSE events. */
 function meterStream(source: NodeJS.ReadableStream, onDone: (u: Usage) => Promise<void>) {
   const acc = new StreamUsageAccumulator();
   const out = new PassThrough();

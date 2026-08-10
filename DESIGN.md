@@ -1,124 +1,119 @@
-# Curb — Design & Product Spec
+# Curb — Design Document
 
-> **Curb** — nama produk (codename awal: Nomos).
-> Nama ini codename/placeholder — gampang di-find-replace kalau mau ganti (kandidat lain: Curb, Rein, Governor).
->
-> **Satu kalimat:** Curb adalah lapisan kontrol di antara agent kamu dan dunia luar (LLM API + tools), yang **mencegah agent kebablasan** — loop tak terbatas, ledakan biaya, dan aksi berbahaya — lewat satu *policy engine* terpusat.
+This is the architecture document. For usage and getting started, see [README.md](README.md).
 
 ---
 
-## 1. Kenapa ini dibangun (problem)
+## 1. The problem
 
-Siapa pun yang pernah menjalankan AI agent pasti pernah kena minimal satu dari ini:
+Anyone who has run an AI agent in production has hit at least one of these:
 
-1. **Loop tak terbatas** — agent nyangkut, memanggil LLM berulang-ulang dengan konteks yang sama, nggak pernah selesai.
-2. **Ledakan biaya** — satu run yang harusnya $0.10 tiba-tiba jadi $40 karena retry, konteks membengkak, atau loop di atas. Ketahuannya belakangan pas lihat tagihan.
-3. **Aksi berbahaya tanpa izin** — agent mengeksekusi tool yang destruktif (hapus file, kirim email, transaksi, `rm -rf`, DB write) tanpa ada gerbang persetujuan.
+1. **Infinite loops.** The agent gets stuck, calling the LLM over and over with the same
+   context, never finishing.
+2. **Cost blowups.** A run that should cost $0.10 becomes $40 through retries, context
+   growth, or the loop above. You find out on the invoice.
+3. **Dangerous actions without permission.** The agent executes a destructive tool — delete
+   a file, send an email, make a payment, write to a production database — with no approval
+   gate in front of it.
 
-Ketiganya sebenarnya **gejala dari satu penyakit yang sama**: agent berjalan tanpa *policy layer* yang bisa menghentikannya. Hari ini tiap tim menambal sendiri dengan `if step > 20: break` yang tersebar di mana-mana, tanpa observability, tanpa audit, tanpa kontrol terpusat.
+All three are symptoms of the same illness: **the agent runs with no policy layer able to
+stop it.** Today, teams patch this individually with `if step > 20: break` scattered through
+the codebase — no observability, no audit trail, no central control.
 
-**Insight inti produk:** *circuit breaker* (cost/loop) dan *guardrail* (izin aksi) itu **bukan dua produk** — keduanya cuma dua jenis **policy** yang dievaluasi oleh engine yang sama. Curb membangun engine itu, lalu breaker & guardrail jadi policy di atasnya.
-
----
-
-## 2. Prinsip desain
-
-- **Fail-safe, bukan fail-open.** Kalau ragu / policy engine down, default-nya *stop*, bukan *lanjut* (opsional, bisa dikonfigurasi per-environment).
-- **Zero-to-low code untuk dipakai.** Lapisan pertama (cost/loop breaker) harus bisa dipakai tanpa mengubah kode agent sama sekali.
-- **Satu policy engine, banyak enforcement point.** Otak (evaluasi policy) terpusat; tangan (tempat penegakan) tersebar.
-- **Language-agnostic di inti, idiomatik di tepi.** Inti tidak peduli bahasa; SDK tipis bikin nyaman di TS & Python.
-- **Observable by default.** Tiap keputusan (allow/deny/ask) tercatat: run mana, policy mana, alasan apa, biaya berapa.
+**The core product insight:** a *circuit breaker* (cost/loop) and a *guardrail* (action
+permission) are **not two products**. They are two kinds of **policy**, evaluated by the same
+engine. Curb builds that engine; breakers and guardrails become policies on top of it.
 
 ---
 
-## 3. Rekomendasi Form Factor (jawaban atas pertanyaan arsitektur)
+## 2. Design principles
 
-Kamu memilih **dua bahasa (TS + Python)** dan **full guardrail framework**. Dengan dua syarat itu, **tidak ada satu form factor tunggal yang cukup.** Ini kenapa:
+- **Fail-safe, not fail-open.** When in doubt, or when the policy engine is unreachable, the
+  default is *stop*, not *continue*. Configurable per environment via `CURB_FAIL_MODE`.
+- **Zero-to-low code to adopt.** The first layer (cost/loop breaker) must work without
+  changing agent code at all.
+- **One policy engine, many enforcement points.** The brain (policy evaluation) is central;
+  the hands (enforcement) are distributed.
+- **Language-agnostic core, idiomatic edges.** The core doesn't care about languages; thin
+  SDKs make it comfortable in TypeScript and Python.
+- **Observable by default.** Every decision (allow/deny/ask/throttle) is recorded: which run,
+  which policy, what reason, how much it had cost so far.
 
-| Form factor | Kelebihan | Kekurangan | Cocok untuk |
-|---|---|---|---|
-| **Proxy / Gateway** (user ganti `base_url` LLM ke kita) | Adopsi **nol-kode**, language-agnostic, langsung lihat **semua** LLM call → sempurna buat hitung cost & deteksi loop. Kill switch gampang (tinggal tolak call). | **Tidak bisa** menahan *eksekusi tool* di runtime user. Proxy cuma lihat *permintaan* model buat manggil tool, tapi eksekusi tool ada di kode user → **guardrail/ask-before-acting lemah**. | Cost cap, loop detect, rate limit, kill switch |
-| **SDK / Middleware** (user bungkus agent loop) | Kontrol **dalam**: lihat tiap step & tiap tool call **sebelum** dieksekusi → bisa gerbang izin, ask-before-acting, blast-radius. | **Per bahasa** (harus maintain TS + Python), adopsi lebih ribet (user ubah kode). | Guardrail, permission, approval, policy per-tool |
-| **CLI wrapper** (`curb run python agent.py`) | Paling gampang dicoba, satu perintah. | Observability dangkal, susah dapat konteks tool-level, kurang production-grade. | Demo, quickstart lokal |
+---
 
-### → Rekomendasi: **Hybrid** — Proxy + SDK tipis (TS & Python) di atas satu Policy Engine
+## 3. Form factor: why hybrid
+
+Neither a proxy nor an SDK alone is sufficient.
+
+| Form factor | Strengths | Limits |
+| :-- | :-- | :-- |
+| **Proxy / gateway** (user points `base_url` at us) | **Zero-code** adoption, language-agnostic, sees **every** LLM call — perfect for metering cost and detecting loops. Kill switch is trivial: refuse the call. | **Cannot** hold a tool execution inside the user's runtime. It sees the model *requesting* a tool call, but the execution happens in user code. Guardrails are weak here. |
+| **SDK / middleware** (user wraps the agent loop) | **Deep control**: sees every step and every tool call **before** execution — permission gates, ask-before-acting, blast-radius limits. | Per language (TypeScript *and* Python to maintain), and adoption requires code changes. |
+| **CLI wrapper** (`curb run python agent.py`) | Easiest thing to try, one command. | Shallow observability, hard to get tool-level context, not production-grade. |
+
+Curb ships **proxy + thin SDKs over one policy engine**:
 
 ```
-                    ┌─────────────────────────┐
-                    │     POLICY ENGINE        │  ← otak: evaluasi semua policy
-                    │  (cost, loop, rate,      │
-                    │   tool-permission, ...)  │
-                    └───────────▲─────────────┘
-                                │  Decision API (allow/deny/ask/throttle)
-              ┌─────────────────┼──────────────────┐
-              │                 │                  │
-        ┌─────┴─────┐    ┌──────┴──────┐    ┌──────┴──────┐
-        │  GATEWAY  │    │   SDK-TS    │    │ SDK-PYTHON  │  ← tangan (enforcement points)
-        │  (proxy)  │    │ (middleware)│    │ (middleware)│
-        └─────┬─────┘    └──────┬──────┘    └──────┬──────┘
-              │                 │                  │
-       intercept LLM      gerbang tool       gerbang tool
-       call (cost/loop)   call (guardrail)   call (guardrail)
+                         ┌────────────────────────────┐
+                         │       POLICY ENGINE        │   the brain
+                         │  cost · loop · rate · time │
+                         │  steps · tool permission   │
+                         └─────────────▲──────────────┘
+                                       │ Decision API (allow/deny/ask/throttle)
+              ┌────────────────────────┼────────────────────────┐
+     ┌────────┴────────┐      ┌────────┴────────┐      ┌────────┴────────┐
+     │     GATEWAY     │      │     SDK-TS      │      │   SDK-PYTHON    │   the hands
+     │     (proxy)     │      │   (middleware)  │      │   (middleware)  │
+     └────────┬────────┘      └────────┬────────┘      └────────┬────────┘
+     intercept LLM call        gate tool call           gate tool call
+      (cost, loops)             (guardrail)              (guardrail)
 ```
 
-**Kenapa hybrid, bukan salah satu saja:**
-
-- **Proxy jadi jaring pengaman universal.** Begitu user arahkan `base_url`, *semua* LLM call kelihatan — cost & loop ketahan tanpa mereka sentuh kode. Ini "pintu masuk" yang paling gampang dijual.
-- **SDK jadi lapisan guardrail dalam.** Untuk ask-before-acting / permission (yang kamu mau sejak awal), kita **wajib** intercept tool call di runtime user — dan itu cuma bisa dari dalam kode (SDK). Proxy nggak bisa.
-- **Dua-duanya nyetor ke satu Policy Engine.** Persis insight kamu: breaker = satu policy, guardrail = policy lain, semua satu engine. Tidak ada logika ganda.
-
-Konsekuensi praktis: **mulai dari Proxy + Policy Engine dulu** (nilai kebukti cepat), lalu SDK menyusul untuk mengaktifkan guardrail penuh. Arsitektur di bawah sudah menyiapkan keduanya.
+- The **proxy is the universal safety net.** The moment a user points `base_url` at it, every
+  LLM call is visible — cost and loops are caught with no code change. It is the easiest door
+  to walk through.
+- The **SDK is the deep guardrail layer.** Ask-before-acting requires intercepting the tool
+  call inside the user's runtime, which only in-process code can do.
+- **Both report to one policy engine.** A breaker is one policy, a guardrail is another. No
+  duplicated logic.
 
 ---
 
-## 4. Arsitektur sistem
+## 4. Components
 
-Tiga bidang klasik: **control plane**, **data plane**, **policy engine** (dipakai bersama).
+| Component | Package | Role |
+| :-- | :-- | :-- |
+| Policy engine | `packages/policy-engine` | `evaluate(ctx, policies, state) → Decision`. Pure, synchronous, no I/O. Imported directly by the gateway, and reached over HTTP by the SDKs. |
+| Shared types | `packages/shared` | `Policy`, `Decision`, `Context`, `RunState` + Zod schemas. |
+| Gateway | `apps/gateway` | Policy enforcement point for **LLM calls**. OpenAI/Anthropic-compatible endpoint. |
+| Control plane | `apps/control-plane` | Decision API, policy CRUD, approvals, audit log, dashboard. |
+| SDK (TS / Python) | `packages/sdk-ts`, `sdks/python` | Policy enforcement point for **tool calls**. |
+| State | Redis | Ephemeral `RunState`: token/cost/step counters, loop signature windows, rate windows. |
+| Persistence | Postgres | Policies, audit events, approvals, run summaries. |
 
-### 4.1 Komponen
+### Gateway request flow
 
-- **Policy Engine** (`packages/policy-engine`, TS, murni/stateless-logic)
-  Fungsi inti `evaluate(context, policies, state) → Decision`. Tidak tahu HTTP, tidak tahu DB. Bisa diimpor langsung oleh Gateway & Control Plane, atau dipanggil via Decision API oleh SDK.
+1. Identify `run_id` (from `X-Curb-Run-Id`, or generate one).
+2. Push the message signature and call timestamp onto the run's windows.
+3. Load `RunState` and call `evaluate()`.
+4. `ALLOW` → forward upstream, then meter tokens/cost from the response and increment counters.
+   `DENY` → return `429`/`403` in the provider's own error shape.
+   `THROTTLE` → wait, or return `429` with `Retry-After` if the wait is too long.
+5. Emit an audit event, fire-and-forget.
 
-- **Gateway / Proxy** (`apps/gateway`, TS + Fastify) — *Policy Enforcement Point untuk LLM call*
-  OpenAI/Anthropic-compatible endpoint. User set `base_url` ke sini. Tiap request:
-  1. Identifikasi `run_id` (dari header `X-Curb-Run-Id` atau di-generate).
-  2. Ambil `RunState` (counter token/cost/step/loop-signature) dari store.
-  3. Panggil `evaluate()` dengan konteks LLM-call.
-  4. Kalau `ALLOW` → forward ke provider asli, hitung token/cost dari response, update state. Kalau `DENY` → balikin error `429/403` dengan alasan. Kalau `THROTTLE` → delay.
+### SDK tool-call flow
 
-- **Control Plane** (`apps/control-plane`, TS + Fastify + web dashboard) — *otak operasional*
-  - Decision API (`POST /v1/decisions`) buat SDK yang butuh keputusan.
-  - CRUD policy & policy-set (`/v1/policies`).
-  - Approval API (`/v1/approvals`) untuk ask-before-acting (human-in-the-loop).
-  - Audit log & metrics (`/v1/runs`, `/v1/events`).
-  - Dashboard: lihat run berjalan, biaya real-time, event yang di-block, antrian approval.
-
-- **SDK-TS** (`packages/sdk-ts`) & **SDK-Python** (`sdks/python`) — *PEP untuk tool call*
-  - `guard.wrapTool(fn, {name, sensitivity})` → sebelum eksekusi, tanya Decision API; kalau `ASK`, tahan & tunggu approval.
-  - `guard.run(fn)` → bikin `run_id`, ikat context, laporkan step.
-  - Auto-set `base_url` LLM ke Gateway (opsional) supaya cost/loop juga kejaring.
-
-- **State store**: Redis (counter per-run, loop signature window, rate window). **Persistensi**: Postgres (policy, audit event, approval, run summary).
-
-### 4.2 Alur data (data flow)
-
-```
-Agent  ──LLM call──►  Gateway ──evaluate()──► Policy Engine
-                        │  ALLOW → provider asli → update RunState (token, cost)
-                        │  DENY  → 429 + reason (breaker trip)
-Agent  ──tool call──►  SDK guard ──POST /decisions──► Control Plane ──evaluate()──► Policy Engine
-                        │  ALLOW → jalankan tool
-                        │  ASK   → buat Approval → tunggu → (approve→jalan / deny→batal)
-                        │  DENY  → lempar PolicyViolation
-Semua keputusan ──────► Audit log (Postgres) ──────► Dashboard
-```
+1. `POST /v1/decisions` with the tool name, sensitivity, and redacted arguments.
+2. `ALLOW` → run the tool. `DENY` → throw `PolicyViolation`; the tool never executes.
+3. `ASK` → the control plane creates an approval; the SDK long-polls
+   `GET /v1/approvals/:id?wait=…` and holds execution until a human decides or the budget
+   expires (which then follows the fail mode).
 
 ---
 
-## 5. Model policy (jantung sistem)
+## 5. The policy model
 
-Semua aturan direduksi jadi satu bentuk seragam:
+Every rule reduces to one uniform shape:
 
 ```ts
 interface Policy {
@@ -126,107 +121,140 @@ interface Policy {
   name: string
   type: PolicyType            // 'cost_cap' | 'loop_detect' | 'rate_limit'
                               // | 'tool_permission' | 'step_limit' | 'time_limit'
-  scope: PolicyScope          // { org?, project?, run?, tool? } — di mana berlaku
-  when?: Condition            // opsional: kondisi tambahan (mis. env == 'prod')
-  params: Record<string, any> // parameter spesifik per-type
+  scope: PolicyScope          // { org?, project?, run?, tool? } — where it applies
+  when?: Condition            // optional extra condition, e.g. env === 'prod'
+  params: Record<string, unknown>
   action: Action              // 'allow' | 'deny' | 'ask' | 'throttle'
   enabled: boolean
 }
-```
 
-Fungsi evaluasi:
-
-```ts
 function evaluate(ctx: Context, policies: Policy[], state: RunState): Decision
 // Decision = { effect: 'ALLOW'|'DENY'|'ASK'|'THROTTLE', policyId?, reason?, retryAfterMs? }
 ```
 
-`Context` bisa berupa `llm_call` (dilihat Gateway) atau `tool_call`/`step` (dilihat SDK). Engine memilih policy yang match scope + type + when, mengevaluasi, dan mengembalikan keputusan paling ketat (DENY > ASK > THROTTLE > ALLOW).
+`Context` is either an `llm_call` (seen by the gateway) or a `tool_call` / `step` (seen by the
+SDK). The engine selects policies matching scope + type + `when`, evaluates each, and returns
+the **strictest** decision: `DENY > ASK > THROTTLE > ALLOW`. Policy order never matters.
 
-### Policy tipe MVP
+### MVP policy types
 
-| Type | Params | Cara kerja | Enforcement point |
-|---|---|---|---|
-| `cost_cap` | `maxUsd`, `window` (`run`/`hour`/`day`) | Jumlahkan cost dari RunState; lewat batas → DENY | Gateway |
-| `loop_detect` | `signatureWindow`, `maxRepeats` | Hash pesan/urutan tool-call; sinyal sama berulang > N → DENY | Gateway + SDK |
-| `step_limit` | `maxSteps` | Hitung step per run; lewat → DENY | SDK |
-| `rate_limit` | `maxCalls`, `perMs` | Sliding window per run/tool | Gateway |
-| `time_limit` | `maxWallClockMs` | Umur run > batas → DENY | Gateway + SDK |
-| `tool_permission` | `tools[]`, `sensitivity`, `mode` (`ask`/`deny`/`allow`) | Tool sensitif → ASK (human approve) atau DENY | SDK |
+| Type | Params | How it works | Enforcement point |
+| :-- | :-- | :-- | :-- |
+| `cost_cap` | `maxUsd` | Sum cost from `RunState`; over the limit → DENY | Gateway |
+| `loop_detect` | `signatureWindow`, `maxRepeats` | Hash messages / tool-call order; the same signal repeating > N → DENY | Gateway + SDK |
+| `step_limit` | `maxSteps` | Count steps per run; beyond the limit → DENY | SDK |
+| `rate_limit` | `maxCalls`, `perMs` | Sliding window per run | Gateway |
+| `time_limit` | `maxWallClockMs` | Run older than the limit → DENY | Gateway + SDK |
+| `tool_permission` | `tools[]`, `sensitivity`, `mode` | Sensitive tool → ASK (human approval) or DENY | SDK |
 
-Menambah kemampuan baru = menambah satu file policy, bukan mengubah arsitektur. Inilah kenapa "breaker dulu → guardrail penuh" tidak butuh rewrite.
+Adding a capability means adding one policy file, not changing the architecture. That is why
+"breaker first, full guardrails later" needed no rewrite.
 
-### Loop detection (detail)
+### Loop detection in detail
 
-Dua sinyal digabung:
-1. **Semantic repeat** — hash normalisasi dari `messages` (buang timestamp/id). Sama persis muncul ≥ `maxRepeats` dalam `signatureWindow` call terakhir → loop.
-2. **Tool-cycle repeat** — urutan `tool → tool → tool` yang sama berulang (mis. A→B→A→B→A→B) → loop.
+Two signals are combined:
 
-Kalau loop terdeteksi → trip breaker (DENY sisa call di run itu) + catat event + (opsional) kirim webhook/Slack.
+1. **Semantic repeat** — a normalised hash of `messages` (timestamps and ids dropped). The
+   same hash appearing ≥ `maxRepeats` times within the last `signatureWindow` calls is a loop.
+2. **Tool-cycle repeat** — the same short tool sequence repeating (e.g. A→B→A→B→A→B).
+
+On detection the breaker trips: the rest of the run is denied, an event is recorded, and a
+webhook/Slack alert can fire.
+
+### Boundary conventions
+
+Two conventions matter when reading the evaluators, because they decide whether a limit means
+"N allowed" or "N−1 allowed":
+
+- `cost_cap` uses `>=`, because cost is only known **after** a call returns.
+- `step_limit` and `rate_limit` use `>`, because the caller increments the counter **before**
+  evaluating, so the current call is already included.
 
 ---
 
 ## 6. Data model (Postgres)
 
 ```
-orgs(id, name)
-projects(id, org_id, name, api_key_hash)
-policies(id, project_id, name, type, scope_json, when_json, params_json, action, enabled, created_at)
+orgs(id, name, created_at)
+projects(id, org_id, name, api_key_hash, created_at)
+policies(id, project_id, name, type, scope_json, when_json, params_json, action, enabled, …)
 runs(id, project_id, started_at, ended_at, status, total_tokens, total_cost_usd, step_count, verdict)
-events(id, run_id, ts, kind, context_json, decision_json, policy_id)   -- audit trail
-approvals(id, run_id, tool_name, args_json, status, requested_at, decided_at, decided_by)
+events(id, run_id, project_id, ts, kind, effect, policy_id, reason, context_json, decision_json)
+approvals(id, run_id, project_id, tool_name, args_json, reason, policy_id, status,
+          requested_at, decided_at, decided_by)
 ```
 
-`RunState` (Redis, ephemeral, TTL): `run:{id}` → `{ tokens, costUsd, stepCount, startedAt, sigWindow[], toolWindow[] }`.
+`RunState` lives in Redis under `curb:run:{id}` with a 24-hour TTL: `{ tokens, costUsd,
+stepCount, startedAt, sigWindow[], toolWindow[], callTimestamps[] }`. Counters use
+`HINCRBY`/`HINCRBYFLOAT` so they stay atomic across gateway instances — a read-modify-write
+here is exactly how a cost cap leaks under concurrency.
+
+Approvals are decided with `UPDATE … WHERE status='pending'`, which makes the first decision
+win atomically without an explicit transaction, even if two operators click at once.
 
 ---
 
-## 7. Flow end-to-end (skenario nyata)
+## 7. End-to-end scenarios
 
-**Skenario A — Cost cap (nol kode, via proxy):**
-1. User set `OPENAI_BASE_URL=https://gw.curb.dev/v1` + `X-Curb-Key`.
-2. Policy aktif: `cost_cap { maxUsd: 2.00, window: run }`.
-3. Agent jalan; tiap call Gateway update cost. Saat kumulatif > $2 → call berikutnya dapat `429 { reason: "cost_cap: run melebihi $2.00" }`.
-4. Agent berhenti, event tercatat, dashboard menampilkan run yang di-trip.
+**A — Cost cap (zero code, via the proxy).**
+User sets `OPENAI_BASE_URL=https://gw.curb.dev/v1` plus `X-Curb-Key`. Policy: `cost_cap
+{ maxUsd: 2.00 }`. The gateway updates cost after each call; once cumulative cost passes $2,
+the next call gets `429 { reason: "cost_cap: run reached $2.00 (limit $2.00)" }`. The agent
+stops, the event is recorded, the dashboard shows the tripped run.
 
-**Skenario B — Loop breaker:**
-1. Agent nyangkut, kirim messages identik berulang.
-2. Gateway hitung signature; pada repeat ke-`maxRepeats` → DENY + tandai `verdict: looped`.
+**B — Loop breaker.**
+The agent gets stuck sending identical messages. The gateway computes signatures and, on
+repeat number `maxRepeats`, denies and marks the run's verdict.
 
-**Skenario C — Ask-before-acting (guardrail, via SDK):**
-1. Tool `delete_file` di-wrap: `guard.wrapTool(deleteFile, { name:'delete_file', sensitivity:'high' })`.
-2. Policy: `tool_permission { tools:['delete_file'], mode:'ask' }`.
-3. Saat agent mau panggil `delete_file`, SDK POST ke Decision API → `ASK` → buat Approval → **tahan eksekusi**.
-4. Manusia lihat di dashboard/Slack, klik Approve/Deny → SDK lanjut atau lempar `PolicyViolation`.
-
----
-
-## 8. Roadmap / milestone (dipakai juga oleh prompt Claude Code)
-
-- **M0 — Fondasi & Policy Engine.** Types, `evaluate()`, RunState store (in-memory + Redis), unit test policy `cost_cap`, `loop_detect`, `step_limit`.
-- **M1 — Gateway (breaker).** OpenAI/Anthropic-compatible proxy, forwarding, penghitungan token/cost, integrasi engine, error DENY yang rapi. *Titik "nilai kebukti cepat".*
-- **M2 — Control Plane + Dashboard.** Decision API, CRUD policy, audit log, dashboard run/cost/event realtime.
-- **M3 — SDK (guardrail).** SDK-TS & SDK-Python: `run()`, `wrapTool()`, ask-before-acting + approval flow.
-- **M4 — Integrasi & polish.** Adaptor contoh (Vercel AI SDK, LangChain JS/Py), webhook/Slack alert, quickstart, docker-compose one-command up.
-
-Acceptance ringkas tiap milestone ada di `CLAUDE_CODE_PROMPT.md`.
+**C — Ask-before-acting (via the SDK).**
+`delete_file` is wrapped with `wrapTool(deleteFile, { name: 'delete_file', sensitivity: 'high' })`.
+Policy: `tool_permission { tools: ['delete_file'], mode: 'ask' }`. When the agent tries to
+call it, the SDK gets `ASK`, an approval is created, and **execution is held**. A human sees it
+on the dashboard (or in Slack), clicks Approve or Deny, and the SDK either proceeds or throws
+`PolicyViolation`.
 
 ---
 
-## 9. Non-goals (MVP)
+## 8. Security posture
 
-- Bukan APM/observability umum (fokus: keputusan keamanan, bukan tracing lengkap).
-- Bukan LLM router/load-balancer (walau proxy bisa berkembang ke sana).
-- Belum multi-region / HA di MVP.
-- Belum "memory passport" / multi-agent traffic control (ide #4/#5 — nanti).
+- **API keys** are stored as SHA-256 hashes; the raw key never touches the database. The
+  provider key passes through the gateway to the upstream and is never persisted.
+- **Curb headers are stripped** before forwarding upstream, so `x-curb-*` never leaks to
+  OpenAI or Anthropic.
+- **Prompts are never logged.** Audit events carry summaries and a signature hash, not content.
+- **Tool arguments are redacted** before storage: long values are truncated, and keys matching
+  `password|secret|token|key|auth|credential|cookie|session` become `sha256:…`. A human
+  reviewing an approval still sees enough context to decide.
+- **Auth is required everywhere** except `/health` and the dashboard shell — including the
+  Decision API, since an unauthenticated decision endpoint would let anyone read another
+  project's policies or forge runs.
+
+---
+
+## 9. Non-goals (for now)
+
+- Not a general APM / observability product — the focus is security decisions, not full tracing.
+- Not an LLM router or load balancer, although the proxy could grow in that direction.
+- No multi-region or HA story yet.
+- No "memory passport" or multi-agent traffic control yet.
 
 ---
 
 ## 10. Tech stack
 
-- **Bahasa:** TypeScript (Node 20+) untuk engine, gateway, control-plane, dashboard, sdk-ts. Python 3.11+ untuk sdk-python.
-- **Web:** Fastify (gateway & API), Next.js/React (dashboard).
-- **Data:** Postgres (Prisma/Drizzle), Redis (ioredis).
-- **Validasi:** Zod (TS), Pydantic (Py).
-- **Monorepo:** pnpm workspaces. **Test:** Vitest (TS), pytest (Py).
-- **Dev:** docker-compose (postgres + redis + gateway + control-plane).
+- **Languages:** TypeScript (Node 20+, ESM, strict) for the engine, gateway, control plane,
+  dashboard and TS SDK. Python 3.11+ for the Python SDK.
+- **Web:** Fastify for the gateway and API. The dashboard is a single dependency-free HTML
+  file served by Fastify — no build step, no CDN.
+- **Data:** Postgres (raw SQL through `pg`, with a small idempotent migrator), Redis (ioredis).
+- **Validation:** Zod (TypeScript), plain dicts with explicit checks (Python).
+- **Monorepo:** pnpm workspaces. **Tests:** Vitest (TS), pytest (Python).
+- **Dev:** docker compose (postgres + redis + gateway + control-plane).
+
+### Deviation from the original spec
+
+The spec suggested Prisma or Drizzle. The implementation uses raw SQL behind a `Repo`
+interface with two implementations (Postgres and in-memory) instead. The reason: it removes a
+codegen step, and — more importantly — it lets the entire HTTP API be tested end-to-end
+without a live database, which is what makes the control-plane test suite fast and hermetic.
+The schema itself is exactly as specified in §6.

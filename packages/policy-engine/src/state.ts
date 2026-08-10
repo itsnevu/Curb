@@ -24,7 +24,7 @@ export function emptyState(runId: string, now: number): RunState {
   };
 }
 
-/** Store in-memory untuk dev/test single-process. Produksi: RedisRunStateStore. */
+/** In-memory store for single-process dev and tests. Production uses RedisRunStateStore. */
 export class InMemoryRunStateStore implements RunStateStore {
   private map = new Map<string, RunState>();
   constructor(private now: () => number = () => 0) {}

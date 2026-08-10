@@ -20,7 +20,7 @@ export interface ControlPlaneDeps {
   now?: () => number;
   failMode?: "open" | "closed";
   logger?: boolean;
-  /** Dashboard butuh key untuk memanggil API-nya sendiri dari browser. */
+  /** The dashboard needs a key to call its own API from the browser. */
   dashboardApiKey?: string;
   notifier?: Notifier;
 }
@@ -32,7 +32,7 @@ export function buildApp(deps: ControlPlaneDeps): FastifyInstance {
 
   app.get("/health", async () => ({ ok: true, service: "curb-control-plane" }));
 
-  // Dashboard: satu file HTML tanpa build step, dilayani langsung oleh Fastify.
+  // Dashboard: a single HTML file with no build step, served directly by Fastify.
   app.get("/", async (_req, reply) => {
     const html = readFileSync(join(HERE, "public", "dashboard.html"), "utf8").replace(
       "__CURB_API_KEY__",

@@ -12,7 +12,7 @@ export interface AuditEvent {
   model?: string;
   costUsdSnapshot: number;
   tokensSnapshot: number;
-  /** Ringkasan konteks — TIDAK pernah berisi prompt mentah. */
+  /** A context summary — NEVER contains raw prompts. */
   contextDigest?: string;
 }
 
@@ -20,13 +20,13 @@ export interface AuditSink {
   emit(event: AuditEvent): void;
 }
 
-/** Sink no-op untuk test/standalone. */
+/** No-op sink for tests and standalone mode. */
 export const NULL_SINK: AuditSink = { emit: () => {} };
 
 /**
- * Kirim event ke control-plane tanpa menunggu (fire-and-forget) supaya
- * latensi audit tidak menempel di jalur permintaan user. Kegagalan di-buffer
- * lalu di-flush; kalau buffer penuh, event tertua dibuang dan dihitung.
+ * Sends events to the control plane without waiting (fire-and-forget), so audit
+ * latency never lands on the user's request path. Failures are buffered and retried;
+ * if the buffer fills, the oldest event is dropped and counted.
  */
 export class HttpAuditSink implements AuditSink {
   private queue: AuditEvent[] = [];
@@ -71,7 +71,7 @@ export class HttpAuditSink implements AuditSink {
       this.dropped = 0;
     } catch (err) {
       this.opts.onError?.(err);
-      // kembalikan ke antrian supaya tidak hilang saat control-plane restart
+      // put the batch back so nothing is lost across a control-plane restart
       this.queue.unshift(...batch);
       this.schedule();
     }

@@ -9,25 +9,25 @@ import {
 import { PriceTable, DEFAULT_PRICING_PER_MTOK } from "./pricing.js";
 
 describe("detectProvider", () => {
-  it("mengenali Anthropic dari path", () => {
+  it("detects Anthropic from the path", () => {
     expect(detectProvider("/v1/messages", {})).toBe("anthropic");
   });
-  it("mengenali OpenAI dari path", () => {
+  it("detects OpenAI from the path", () => {
     expect(detectProvider("/v1/chat/completions", {})).toBe("openai");
   });
-  it("mengenali Anthropic dari header x-api-key", () => {
+  it("detects Anthropic from the x-api-key header", () => {
     expect(detectProvider("/v1/complete", { "x-api-key": "sk-ant" })).toBe("anthropic");
   });
-  it("header x-curb-provider menang atas tebakan path", () => {
+  it("the x-curb-provider header beats the path guess", () => {
     expect(detectProvider("/v1/messages", { "x-curb-provider": "openai" })).toBe("openai");
   });
 });
 
 describe("sanitizeHeaders", () => {
-  it("membuang header Curb dan hop-by-hop, menyisakan kredensial", () => {
+  it("strips Curb and hop-by-hop headers, keeps credentials", () => {
     const out = sanitizeHeaders({
       "x-curb-run-id": "r1",
-      "x-curb-key": "rahasia",
+      "x-curb-key": "secret",
       host: "gw.curb.dev",
       "content-length": "42",
       connection: "keep-alive",
@@ -39,55 +39,55 @@ describe("sanitizeHeaders", () => {
 });
 
 describe("extractUsage", () => {
-  it("format OpenAI", () => {
+  it("OpenAI format", () => {
     expect(extractUsage({ usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } }))
       .toEqual({ promptTokens: 10, completionTokens: 5, totalTokens: 15 });
   });
-  it("format Anthropic", () => {
+  it("Anthropic format", () => {
     expect(extractUsage({ usage: { input_tokens: 10, output_tokens: 5 } }))
       .toEqual({ promptTokens: 10, completionTokens: 5, totalTokens: 15 });
   });
-  it("token cache ikut dihitung sebagai input", () => {
+  it("cached tokens count as input", () => {
     expect(extractUsage({ usage: { input_tokens: 10, cache_read_input_tokens: 90, output_tokens: 5 } }).promptTokens)
       .toBe(100);
   });
-  it("tanpa usage → nol", () => {
+  it("no usage → zero", () => {
     expect(extractUsage({}).totalTokens).toBe(0);
     expect(extractUsage(null).totalTokens).toBe(0);
   });
 });
 
 describe("messagesOf", () => {
-  it("system prompt Anthropic ikut masuk signature", () => {
-    const a = messagesOf({ system: "kamu robot", messages: [{ role: "user", content: "hai" }] });
-    const b = messagesOf({ system: "kamu manusia", messages: [{ role: "user", content: "hai" }] });
+  it("the Anthropic system prompt is part of the signature", () => {
+    const a = messagesOf({ system: "you are a robot", messages: [{ role: "user", content: "hi" }] });
+    const b = messagesOf({ system: "you are a human", messages: [{ role: "user", content: "hi" }] });
     expect(a).not.toEqual(b);
   });
 });
 
 describe("StreamUsageAccumulator", () => {
-  it("membaca usage dari chunk terakhir OpenAI", () => {
+  it("reads usage from the final OpenAI chunk", () => {
     const acc = new StreamUsageAccumulator();
     acc.push('data: {"choices":[{"delta":{"content":"a"}}]}\n\n');
     acc.push('data: {"usage":{"prompt_tokens":100,"completion_tokens":20}}\n\ndata: [DONE]\n\n');
     expect(acc.result()).toEqual({ promptTokens: 100, completionTokens: 20, totalTokens: 120 });
   });
 
-  it("membaca usage bertahap ala Anthropic", () => {
+  it("reads usage incrementally, Anthropic style", () => {
     const acc = new StreamUsageAccumulator();
     acc.push('data: {"type":"message_start","message":{"usage":{"input_tokens":50,"output_tokens":1}}}\n\n');
     acc.push('data: {"type":"message_delta","usage":{"output_tokens":30}}\n\n');
     expect(acc.result()).toEqual({ promptTokens: 50, completionTokens: 30, totalTokens: 80 });
   });
 
-  it("tahan terhadap chunk yang terpotong di tengah baris", () => {
+  it("tolerates chunks split mid-line", () => {
     const acc = new StreamUsageAccumulator();
     const line = 'data: {"usage":{"prompt_tokens":7,"completion_tokens":3}}\n\n';
-    for (const ch of line) acc.push(ch); // byte demi byte
+    for (const ch of line) acc.push(ch); // byte by byte
     expect(acc.result().totalTokens).toBe(10);
   });
 
-  it("mengabaikan baris non-JSON tanpa melempar", () => {
+  it("ignores non-JSON lines without throwing", () => {
     const acc = new StreamUsageAccumulator();
     acc.push(": keep-alive\n\ndata: bukan-json\n\n");
     expect(acc.result().totalTokens).toBe(0);
@@ -97,24 +97,24 @@ describe("StreamUsageAccumulator", () => {
 describe("PriceTable", () => {
   const t = new PriceTable(DEFAULT_PRICING_PER_MTOK);
 
-  it("menghitung biaya per juta token", () => {
+  it("prices per million tokens", () => {
     // gpt-4o: $2.5 in / $10 out per Mtok
     expect(t.costUsd("gpt-4o", { promptTokens: 1e6, completionTokens: 0 })).toBeCloseTo(2.5, 6);
     expect(t.costUsd("gpt-4o", { promptTokens: 0, completionTokens: 1e6 })).toBeCloseTo(10, 6);
   });
 
-  it("mencocokkan model bertanggal lewat prefix terpanjang", () => {
+  it("matches dated models by longest prefix", () => {
     expect(t.priceFor("gpt-4o-mini-2024-07-18")).toEqual(t.priceFor("gpt-4o-mini"));
     expect(t.priceFor("gpt-4o-2024-08-06")).toEqual(t.priceFor("gpt-4o"));
   });
 
-  it("model tak dikenal memakai default yang sengaja mahal (fail-safe)", () => {
-    const unknown = t.priceFor("model-antah-berantah");
+  it("unknown models use the deliberately expensive default (fail-safe)", () => {
+    const unknown = t.priceFor("some-unknown-model");
     expect(unknown.in).toBeGreaterThan(t.priceFor("gpt-4o-mini").in);
-    expect(t.has("model-antah-berantah")).toBe(false);
+    expect(t.has("some-unknown-model")).toBe(false);
   });
 
-  it("bisa di-override lewat konstruktor", () => {
+  it("can be overridden via the constructor", () => {
     const custom = new PriceTable({ "gpt-4o": { in: 1, out: 1 }, default: { in: 1, out: 1 } });
     expect(custom.costUsd("gpt-4o", { promptTokens: 1e6, completionTokens: 0 })).toBeCloseTo(1, 6);
   });

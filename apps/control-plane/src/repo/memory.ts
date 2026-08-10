@@ -8,7 +8,7 @@ import type {
   RunSummary,
 } from "./types.js";
 
-/** Repo in-memory: dipakai test dan mode dev tanpa Postgres. */
+/** In-memory repo: used by tests and by dev mode without Postgres. */
 export class MemoryRepo implements Repo {
   private projects = new Map<string, Project>();
   private policies = new Map<string, Map<string, Policy>>();
@@ -78,7 +78,7 @@ export class MemoryRepo implements Repo {
   async decideApproval(id: string, status: ApprovalStatus, by: string, at: number) {
     const a = this.approvals.get(id);
     if (!a) return null;
-    // why: keputusan pertama menang — approve/deny tidak boleh bisa dibalik.
+    // why: the first decision wins — approve/deny must not be reversible.
     if (a.status !== "pending") return a;
     const next = { ...a, status, decidedBy: by, decidedAt: at };
     this.approvals.set(id, next);

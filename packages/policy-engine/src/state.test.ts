@@ -5,9 +5,9 @@ import { InMemoryRunStateStore } from "./state.js";
 import { RedisRunStateStore, type RedisLike } from "./redis-state.js";
 
 /**
- * Kontrak store diuji dua kali: in-memory (dev) dan Redis (produksi).
- * why: dua implementasi HARUS berperilaku identik, kalau tidak policy
- * berubah arti begitu dipindah ke produksi.
+ * The store contract is tested twice: in-memory (dev) and Redis (production).
+ * why: the two implementations MUST behave identically, otherwise policies quietly
+ * change meaning the moment you move to production.
  */
 const makers: Array<[string, () => RunStateStore]> = [
   ["InMemoryRunStateStore", () => new InMemoryRunStateStore(() => 1_000)],
@@ -27,7 +27,7 @@ describe.each(makers)("%s", (_name, make) => {
     await store.reset("r1");
   });
 
-  it("run baru mulai dari nol", async () => {
+  it("a new run starts from zero", async () => {
     const s = await store.get("r1");
     expect(s.costUsd).toBe(0);
     expect(s.tokens).toBe(0);
@@ -35,7 +35,7 @@ describe.each(makers)("%s", (_name, make) => {
     expect(s.sigWindow).toEqual([]);
   });
 
-  it("bump menambah counter secara akumulatif", async () => {
+  it("bump accumulates counters", async () => {
     await store.bump("r1", { tokens: 100, costUsd: 0.25, steps: 1 });
     await store.bump("r1", { tokens: 50, costUsd: 0.5, steps: 1 });
     const s = await store.get("r1");
@@ -44,7 +44,7 @@ describe.each(makers)("%s", (_name, make) => {
     expect(s.stepCount).toBe(2);
   });
 
-  it("bump konkuren tidak kehilangan update (atomik)", async () => {
+  it("concurrent bumps lose no updates (atomic)", async () => {
     await Promise.all(
       Array.from({ length: 20 }, () => store.bump("r1", { costUsd: 0.1, steps: 1 })),
     );
@@ -53,26 +53,26 @@ describe.each(makers)("%s", (_name, make) => {
     expect(s.stepCount).toBe(20);
   });
 
-  it("pushWindow menjaga urutan dan memotong sesuai cap", async () => {
+  it("pushWindow preserves order and trims to the cap", async () => {
     for (const v of ["a", "b", "c", "d"]) await store.pushWindow("r1", "sigWindow", v, 3);
     const s = await store.get("r1");
     expect(s.sigWindow).toEqual(["b", "c", "d"]);
   });
 
-  it("pushWindow mengembalikan isi window setelah push", async () => {
+  it("pushWindow returns the window contents after pushing", async () => {
     await store.pushWindow("r1", "toolWindow", "A", 5);
     const out = await store.pushWindow("r1", "toolWindow", "B", 5);
     expect(out).toEqual(["A", "B"]);
   });
 
-  it("callTimestamps tetap bertipe number", async () => {
+  it("callTimestamps stay typed as numbers", async () => {
     await store.pushWindow("r1", "callTimestamps", 1234, 5);
     const s = await store.get("r1");
     expect(s.callTimestamps).toEqual([1234]);
     expect(typeof s.callTimestamps[0]).toBe("number");
   });
 
-  it("run berbeda tidak saling mencemari", async () => {
+  it("different runs do not contaminate each other", async () => {
     await store.reset("r2");
     await store.bump("r1", { costUsd: 1 });
     await store.bump("r2", { costUsd: 5 });
@@ -80,7 +80,7 @@ describe.each(makers)("%s", (_name, make) => {
     expect((await store.get("r2")).costUsd).toBeCloseTo(5, 6);
   });
 
-  it("reset menghapus counter dan window", async () => {
+  it("reset clears counters and windows", async () => {
     await store.bump("r1", { costUsd: 3, steps: 2 });
     await store.pushWindow("r1", "sigWindow", "a", 5);
     await store.reset("r1");
@@ -90,7 +90,7 @@ describe.each(makers)("%s", (_name, make) => {
     expect(s.sigWindow).toEqual([]);
   });
 
-  it("startedAt tercatat sekali dan tidak berubah", async () => {
+  it("startedAt is recorded once and never changes", async () => {
     await store.bump("r1", { steps: 1 });
     const first = (await store.get("r1")).startedAt;
     await store.bump("r1", { steps: 1 });

@@ -1,13 +1,13 @@
-"""Curb SDK — enforcement point untuk TOOL CALL (guardrail).
+"""Curb SDK — the enforcement point for TOOL CALLS (guardrails).
 
-Contoh:
+Example:
     from curb import Curb
 
     curb = Curb()
-    hapus = curb.wrap_tool(delete_file, name="delete_file", sensitivity="high")
+    remove = curb.wrap_tool(delete_file, name="delete_file", sensitivity="high")
 
     with curb.run() as run_id:
-        hapus("/tmp/x")     # ditahan sampai manusia menyetujui
+        remove("/tmp/x")     # held until a human approves
 """
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ __all__ = ["Curb", "CurbClient", "PolicyViolation", "ApprovalTimeout", "current_
 
 F = TypeVar("F", bound=Callable[..., Any])
 
-# run_id mengalir otomatis ke tool yang dipanggil di dalam run()
+# run_id flows automatically to any tool called inside run()
 _run_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("curb_run_id", default=None)
 
 
@@ -54,10 +54,10 @@ class Curb:
         self.fail_mode = fail_mode
         self.on_decision = on_decision
 
-    # ── konteks run ────────────────────────────────────────────────────────
+    # ── run context ────────────────────────────────────────────────────────
     @contextmanager
     def run(self, run_id: Optional[str] = None) -> Iterator[str]:
-        """Satu run agent: run_id dibuat, disebar, lalu dikembalikan seperti semula."""
+        """One agent run: a run_id is created, propagated, then restored on exit."""
         rid = run_id or self._run_id or str(uuid.uuid4())
         token = _run_id.set(rid)
         try:
@@ -69,12 +69,12 @@ class Curb:
         return current_run_id() or self._run_id or "run-without-context"
 
     def gateway_headers(self) -> Dict[str, str]:
-        """Tempelkan ke klien LLM supaya cost/loop ikut terjaring gateway."""
+        """Attach to your LLM client so cost and loops are caught by the gateway."""
         return {"X-Curb-Run-Id": self.run_id()}
 
-    # ── penegakan ──────────────────────────────────────────────────────────
+    # ── enforcement ────────────────────────────────────────────────────────
     def step(self, **meta: Any) -> None:
-        """Laporkan satu langkah agent — menegakkan step_limit / time_limit."""
+        """Report one agent step — enforces step_limit and time_limit."""
         self._enforce({"kind": "step", "runId": self.run_id(), "meta": meta or {}})
 
     def decide(self, **ctx: Any) -> Dict[str, Any]:
@@ -89,7 +89,7 @@ class Curb:
         sensitivity: str = "low",
         approval_timeout_s: Optional[float] = None,
     ) -> Callable[..., Any]:
-        """Bungkus tool: policy ditanya SEBELUM tool dieksekusi."""
+        """Wrap a tool: the policy engine is consulted BEFORE the tool executes."""
         tool_name = name or getattr(fn, "__name__", "tool")
 
         @functools.wraps(fn)
@@ -115,7 +115,7 @@ class Curb:
         sensitivity: str = "low",
         approval_timeout_s: Optional[float] = None,
     ) -> Callable[[F], F]:
-        """Bentuk dekorator dari wrap_tool.
+        """Decorator form of wrap_tool.
 
             @curb.guard_tool(name="delete_file", sensitivity="high")
             def delete_file(path): ...
@@ -133,9 +133,9 @@ class Curb:
         full = {k: v for k, v in full.items() if v is not None}
         try:
             decision = self.client.decide(full)
-        except Exception as err:  # noqa: BLE001 — semua kegagalan transport diperlakukan sama
-            # Control plane tak terjangkau = kita tidak tahu apakah aksi ini aman.
-            # Default fail-closed: lebih baik agent berhenti daripada bertindak buta.
+        except Exception as err:  # noqa: BLE001 — every transport failure is treated the same
+            # An unreachable control plane means we cannot know whether this action is
+            # safe. Fail closed by default: halting beats acting blind.
             if self.fail_mode == "open":
                 return {"effect": "ALLOW", "reason": f"curb unreachable (fail-open): {err}"}
             return {
@@ -186,7 +186,7 @@ class Curb:
             started = time.monotonic()
             try:
                 view = self.client.wait_approval(approval_id, slice_ms)
-            except Exception:  # noqa: BLE001 — long-poll putus; coba lagi selama masih ada waktu
+            except Exception:  # noqa: BLE001 — long-poll dropped; retry while time remains
                 time.sleep(min(1.0, max(0.0, deadline - time.monotonic())))
                 continue
 
@@ -203,8 +203,8 @@ class Curb:
                     },
                     tool_name,
                 )
-            # why: kalau server balas cepat (tidak mendukung ?wait), tanpa jeda ini
-            # loop berubah jadi busy-poll yang menghantam control plane.
+            # why: if the server replies instantly (no ?wait support), without this pause
+            # the loop becomes a busy-poll that hammers the control plane.
             if (time.monotonic() - started) * 1000 < slice_ms:
                 time.sleep(min(0.5, max(0.0, deadline - time.monotonic())))
 

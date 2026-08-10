@@ -2,7 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { Project, Repo } from "./repo/types.js";
 
-/** API key disimpan sebagai hash — key mentah tidak pernah menyentuh database. */
+/** API keys are stored hashed — the raw key never touches the database. */
 export function hashApiKey(key: string): string {
   return createHash("sha256").update(key).digest("hex");
 }
@@ -28,9 +28,9 @@ declare module "fastify" {
 }
 
 /**
- * Auth berbasis project API key. Fail-safe: tanpa key yang valid, tidak ada
- * akses sama sekali — termasuk ke Decision API (why: decision tanpa auth berarti
- * siapa pun bisa membaca policy orang lain atau memalsukan run).
+ * Project API-key auth. Fail-safe: without a valid key there is no access at all,
+ * including to the Decision API — an unauthenticated decision endpoint would let
+ * anyone read someone else's policies or forge runs.
  */
 export function makeAuth(repo: Repo) {
   return async function authenticate(req: FastifyRequest, reply: FastifyReply) {
@@ -47,8 +47,8 @@ export function makeAuth(repo: Repo) {
 }
 
 /**
- * Sediakan project default dari env supaya `docker compose up` langsung jalan.
- * Hanya untuk bootstrap — produksi bikin project lewat API/seed sendiri.
+ * Provision a default project from env so `docker compose up` works immediately.
+ * Bootstrap only — in production, create projects via the API or your own seed.
  */
 export async function ensureDevProject(repo: Repo, apiKey: string | undefined): Promise<Project | null> {
   if (!apiKey) return null;

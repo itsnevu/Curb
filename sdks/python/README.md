@@ -1,6 +1,6 @@
 # curb-sdk (Python)
 
-Enforcement point untuk **tool call** — hal yang tidak bisa dilakukan proxy.
+The enforcement point for **tool calls** — the thing a proxy fundamentally cannot do.
 
 ```bash
 pip install -e ".[dev]"
@@ -16,31 +16,31 @@ def delete_file(path: str) -> None:
     os.remove(path)
 
 with curb.run() as run_id:
-    # cost & loop juga terjaga kalau klien LLM diarahkan ke gateway:
+    # Cost and loops are covered too if your LLM client points at the gateway:
     #   OpenAI(base_url="http://localhost:8080/v1", default_headers=curb.gateway_headers())
-    curb.step()                 # menegakkan step_limit / time_limit
+    curb.step()                 # enforces step_limit / time_limit
     try:
-        delete_file("/tmp/x")   # ASK → ditahan sampai manusia klik Approve
+        delete_file("/tmp/x")   # ASK → held until a human clicks Approve
     except PolicyViolation as e:
-        print("ditolak:", e, e.policy_id)
+        print("denied:", e, e.policy_id)
 ```
 
-## Perilaku penting
+## Behaviour that matters
 
-| Keputusan | Yang terjadi |
+| Decision | What happens |
 | --- | --- |
-| `ALLOW` | tool jalan |
-| `DENY` | `PolicyViolation`, tool **tidak pernah** dipanggil |
-| `ASK` | eksekusi ditahan sampai ada keputusan manusia (long-poll) |
-| `THROTTLE` | menunggu `retryAfterMs`, lalu jalan |
+| `ALLOW` | the tool runs |
+| `DENY` | `PolicyViolation` is raised; the tool is **never** called |
+| `ASK` | execution is held until a human decides (long-poll) |
+| `THROTTLE` | waits `retryAfterMs`, then runs |
 
-- **Fail-safe.** Kalau control plane tak terjangkau atau approval kehabisan waktu,
-  default-nya menolak (`fail_mode="closed"`). Setel `fail_mode="open"` kalau
-  ketersediaan lebih penting daripada penjagaan.
-- `run_id` mengalir otomatis lewat `contextvars`, jadi tool bersarang tidak
-  perlu dioper run id.
+- **Fail-safe.** If the control plane is unreachable, or an approval runs out of time, the
+  default is to deny (`fail_mode="closed"`). Set `fail_mode="open"` when availability matters
+  more than protection.
+- `run_id` propagates automatically through `contextvars`, so nested tools never need it
+  passed explicitly.
 
-## Test
+## Tests
 
 ```bash
 python -m venv .venv && .venv/bin/pip install -e ".[dev]"

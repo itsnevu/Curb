@@ -8,3 +8,9 @@ __pycache__/
 .venv/
 .next/
 coverage/
+
+# stray build output inside src (must never be committed)
+packages/*/src/**/*.js
+packages/*/src/**/*.d.ts
+packages/*/src/**/*.js.map
+!packages/*/src/types/*.d.ts

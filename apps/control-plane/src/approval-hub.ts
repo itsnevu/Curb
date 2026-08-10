@@ -3,16 +3,16 @@ import type { Approval, ApprovalStatus, Repo } from "./repo/types.js";
 type Waiter = (a: Approval) => void;
 
 /**
- * Menghubungkan dashboard (yang memutuskan) dengan SDK (yang menunggu).
- * SDK long-poll: satu koneksi menggantung sampai ada keputusan atau timeout —
- * jauh lebih hemat dan responsif dibanding polling tiap detik.
+ * Connects the dashboard (which decides) to the SDK (which waits).
+ * SDKs long-poll: one connection hangs until a decision arrives or the wait expires —
+ * far cheaper and more responsive than polling every second.
  */
 export class ApprovalHub {
   private waiters = new Map<string, Set<Waiter>>();
 
   constructor(private repo: Repo) {}
 
-  /** Beritahu semua penunggu bahwa approval sudah diputuskan. */
+  /** Notify every waiter that an approval has been decided. */
   publish(approval: Approval): void {
     const set = this.waiters.get(approval.id);
     if (!set) return;
@@ -21,8 +21,8 @@ export class ApprovalHub {
   }
 
   /**
-   * Tunggu keputusan sampai `timeoutMs`. Mengembalikan approval apa adanya
-   * saat timeout (status masih "pending") — caller yang memutuskan artinya.
+   * Wait up to `timeoutMs` for a decision. On timeout it returns the approval as-is
+   * (still "pending") and lets the caller decide what that means.
    */
   async wait(id: string, timeoutMs: number): Promise<Approval | null> {
     const current = await this.repo.getApproval(id);
@@ -40,8 +40,8 @@ export class ApprovalHub {
       };
       const waiter: Waiter = finish;
       const timer = setTimeout(() => {
-        // why: kembalikan state terkini, bukan error — SDK memutuskan sendiri
-        // apakah mau menunggu lagi atau jatuh ke fail mode.
+        // why: return the current state rather than an error — the SDK decides for
+        // itself whether to keep waiting or fall back to its fail mode.
         void this.repo.getApproval(id).then((a) => finish(a ?? current));
       }, timeoutMs);
       timer.unref?.();

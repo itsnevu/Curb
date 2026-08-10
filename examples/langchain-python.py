@@ -12,24 +12,24 @@ from curb import Curb
 curb = Curb(base_url="http://localhost:8090")
 
 with curb.run():
-    # Cost & loop: arahkan base_url ke gateway, tempelkan run id.
+    # Cost and loops: point base_url at the gateway and attach the run id.
     llm = ChatOpenAI(
         model="gpt-4o",
         base_url="http://localhost:8080/v1",
         default_headers=curb.gateway_headers(),
     )
 
-    # Guardrail: bungkus fungsinya sebelum dijadikan tool LangChain.
+    # Guardrail: wrap the function before turning it into a LangChain tool.
     @tool
     def delete_file(path: str) -> str:
-        """Hapus sebuah file."""
+        """Delete a file."""
         return curb.wrap_tool(_delete, name="delete_file", sensitivity="high")(path)
 
     def _delete(path: str) -> str:
-        return f"terhapus {path}"
+        return f"deleted {path}"
 
     prompt = ChatPromptTemplate.from_messages(
-        [("system", "Kamu asisten operasi."), ("human", "{input}"), ("placeholder", "{agent_scratchpad}")]
+        [("system", "You are an operations assistant."), ("human", "{input}"), ("placeholder", "{agent_scratchpad}")]
     )
     agent = AgentExecutor(agent=create_tool_calling_agent(llm, [delete_file], prompt), tools=[delete_file])
-    print(agent.invoke({"input": "Bersihkan /tmp/cache.db"})["output"])
+    print(agent.invoke({"input": "Clean up /tmp/cache.db"})["output"])

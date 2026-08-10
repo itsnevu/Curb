@@ -8,9 +8,9 @@ import {
 import { POLICY_EVALUATORS } from "./policies/index.js";
 
 /**
- * Inti Curb. Murni & sinkron: tidak tahu HTTP/DB.
- * Memilih policy yang cocok (scope + when), mengevaluasi masing-masing,
- * lalu mengembalikan keputusan PALING KETAT (DENY > ASK > THROTTLE > ALLOW).
+ * The heart of Curb. Pure and synchronous: it knows nothing about HTTP or databases.
+ * Selects the policies that match (scope + when), evaluates each one, and returns
+ * the STRICTEST decision (DENY > ASK > THROTTLE > ALLOW).
  */
 export function evaluate(
   ctx: Context,

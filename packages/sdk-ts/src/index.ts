@@ -9,13 +9,13 @@ export { CurbClient } from "./client.js";
 export type { ClientOptions, DecisionResponse, ApprovalView } from "./client.js";
 
 export interface CurbOptions extends ClientOptions {
-  /** Dipakai kalau tidak sedang berada di dalam run(). */
+  /** Used when not inside a run(). */
   runId?: string;
   projectId?: string;
   env?: string;
-  /** Berapa lama menunggu manusia menyetujui. Default 5 menit. */
+  /** How long to wait for a human to approve. Defaults to 5 minutes. */
   approvalTimeoutMs?: number;
-  /** Apa yang terjadi kalau Curb tidak bisa dihubungi. Default "closed" (tolak). */
+  /** What happens when Curb is unreachable. Defaults to "closed" (deny). */
   failMode?: "open" | "closed";
   onDecision?: (d: DecisionResponse, ctx: Context) => void;
 }
@@ -23,11 +23,11 @@ export interface CurbOptions extends ClientOptions {
 export interface ToolMeta {
   name: string;
   sensitivity?: "low" | "medium" | "high";
-  /** Timeout approval khusus tool ini. */
+  /** Approval timeout specific to this tool. */
   approvalTimeoutMs?: number;
 }
 
-/** runId mengalir otomatis ke tool yang dipanggil di dalam run(). */
+/** runId flows automatically to any tool called inside run(). */
 const runStore = new AsyncLocalStorage<{ runId: string }>();
 
 export function currentRunId(): string | undefined {
@@ -35,11 +35,11 @@ export function currentRunId(): string | undefined {
 }
 
 /**
- * Enforcement point untuk TOOL CALL — hal yang tidak bisa dilakukan proxy.
+ * The enforcement point for TOOL CALLS — the thing a proxy fundamentally cannot do.
  *
  *   const curb = new Curb();
- *   const hapus = curb.wrapTool(deleteFile, { name: "delete_file", sensitivity: "high" });
- *   await curb.run(async () => { await hapus("/tmp/x"); });
+ *   const remove = curb.wrapTool(deleteFile, { name: "delete_file", sensitivity: "high" });
+ *   await curb.run(async () => { await remove("/tmp/x"); });
  */
 export class Curb {
   private client: CurbClient;
@@ -48,29 +48,29 @@ export class Curb {
     this.client = new CurbClient(opts);
   }
 
-  /** Jalankan agent dalam satu run: runId dibuat, disebar, dan bisa dibaca ulang. */
+  /** Run an agent inside one run: a runId is created, propagated, and returned. */
   async run<T>(fn: (runId: string) => Promise<T> | T, runId = this.opts.runId ?? randomUUID()): Promise<T> {
     return runStore.run({ runId }, async () => fn(runId));
   }
 
-  /** runId aktif — dipakai untuk mengoper ke gateway lewat header X-Curb-Run-Id. */
+  /** The active runId — passed to the gateway via the X-Curb-Run-Id header. */
   runId(): string {
     return currentRunId() ?? this.opts.runId ?? "run-without-context";
   }
 
-  /** Header yang perlu ditempel ke klien LLM supaya cost/loop ikut terjaring gateway. */
+  /** Headers to attach to your LLM client so cost and loops are caught by the gateway. */
   gatewayHeaders(): Record<string, string> {
     return { "X-Curb-Run-Id": this.runId() };
   }
 
-  /** Laporkan satu langkah agent — menegakkan step_limit / time_limit / loop_detect. */
+  /** Report one agent step — enforces step_limit, time_limit and loop_detect. */
   async step(meta: Record<string, unknown> = {}): Promise<void> {
     await this.enforce({ kind: "step", runId: this.runId(), meta });
   }
 
   /**
-   * Bungkus tool. Sebelum tool dieksekusi, policy ditanya:
-   * ALLOW → jalan · DENY → PolicyViolation · ASK → tahan sampai manusia memutuskan.
+   * Wrap a tool. Before it executes, the policy engine is consulted:
+   * ALLOW → run · DENY → PolicyViolation · ASK → hold until a human decides.
    */
   wrapTool<A extends unknown[], R>(fn: (...args: A) => R | Promise<R>, meta: ToolMeta) {
     const wrapped = async (...args: A): Promise<R> => {
@@ -90,7 +90,7 @@ export class Curb {
     return wrapped;
   }
 
-  /** Bungkus banyak tool sekaligus: { nama: fn } → { nama: fn terjaga }. */
+  /** Wrap many tools at once: { name: fn } → { name: guarded fn }. */
   wrapTools<T extends Record<string, (...args: never[]) => unknown>>(
     tools: T,
     meta: Record<keyof T, Omit<ToolMeta, "name">> | Omit<ToolMeta, "name"> = {},
@@ -105,7 +105,7 @@ export class Curb {
     ) as unknown as T;
   }
 
-  /** Minta keputusan tanpa membungkus apa pun. */
+  /** Ask for a decision without wrapping anything. */
   async decide(ctx: Partial<Context> & Pick<Context, "kind">): Promise<DecisionResponse> {
     return this.ask({ runId: this.runId(), ...ctx } as Context);
   }
@@ -117,8 +117,8 @@ export class Curb {
       this.opts.onDecision?.(d, full);
       return d;
     } catch (err) {
-      // why: control plane tak terjangkau = kita tidak tahu apakah aksi ini aman.
-      // Default fail-closed: lebih baik agent berhenti daripada bertindak buta.
+      // why: an unreachable control plane means we cannot know whether this action is
+      // safe. Fail closed by default: halting beats acting blind.
       if (this.opts.failMode === "open") {
         return { effect: "ALLOW", reason: `curb unreachable (fail-open): ${(err as Error).message}` };
       }
@@ -147,7 +147,7 @@ export class Curb {
     await this.awaitApproval(decision.approvalId, meta);
   }
 
-  /** Long-poll berulang sampai diputuskan atau kehabisan waktu total. */
+  /** Long-poll repeatedly until a decision arrives or the total budget runs out. */
   private async awaitApproval(approvalId: string, meta?: ToolMeta): Promise<void> {
     const budget = meta?.approvalTimeoutMs ?? this.opts.approvalTimeoutMs ?? 5 * 60_000;
     const deadline = Date.now() + budget;
@@ -159,7 +159,7 @@ export class Curb {
       try {
         view = await this.client.waitApproval(approvalId, slice);
       } catch {
-        // koneksi long-poll putus (proxy/timeout jaringan) — coba lagi selama masih ada waktu
+        // the long-poll connection dropped (proxy or network timeout) — retry while time remains
         await sleep(Math.min(1_000, Math.max(0, deadline - Date.now())));
         continue;
       }
@@ -174,14 +174,14 @@ export class Curb {
           meta?.name,
         );
       }
-      // why: kalau server balas cepat (tidak mendukung ?wait), tanpa jeda ini
-      // loop berubah jadi busy-poll yang menghantam server DAN membuat timer
-      // proses ini kelaparan karena tidak pernah keluar dari microtask.
+      // why: if the server replies instantly (no ?wait support), without this pause the
+      // loop becomes a busy-poll that hammers the server AND starves this process's
+      // timers, because it never leaves the microtask queue.
       const elapsed = Date.now() - startedAt;
       if (elapsed < slice) await sleep(Math.min(500, Math.max(0, deadline - Date.now())));
     }
 
-    if (this.opts.failMode === "open") return; // fail-open: lanjut walau tak ada jawaban
+    if (this.opts.failMode === "open") return; // fail-open: proceed even with no answer
     throw new ApprovalTimeout(approvalId, budget, meta?.name);
   }
 }

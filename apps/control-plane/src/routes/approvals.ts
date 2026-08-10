@@ -22,8 +22,8 @@ export function registerApprovals(
   });
 
   /**
-   * `?wait=ms` mengaktifkan long-poll: koneksi digantung sampai ada keputusan.
-   * Tanpa `wait`, ini pembacaan biasa.
+   * `?wait=ms` enables long-polling: the connection hangs until a decision arrives.
+   * Without `wait`, this is an ordinary read.
    */
   app.get("/v1/approvals/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -69,7 +69,7 @@ export function registerApprovals(
       },
     ]);
 
-    hub.publish(decided); // bangunkan SDK yang sedang long-poll
+    hub.publish(decided); // wake up any SDK currently long-polling
     return decided;
   });
 }

@@ -5,7 +5,7 @@ import { buildApp } from "./app.js";
 import { hashApiKey } from "./auth.js";
 import { MemoryRepo } from "./repo/memory.js";
 
-const KEY = "kunci-test";
+const KEY = "test-key";
 const H = { "x-curb-key": KEY, "content-type": "application/json" };
 
 let app: FastifyInstance;
@@ -26,19 +26,19 @@ const policy = (over: Record<string, unknown> = {}) => ({
 });
 
 describe("auth", () => {
-  it("menolak tanpa API key", async () => {
+  it("rejects a request with no API key", async () => {
     expect((await app.inject({ method: "GET", url: "/v1/policies" })).statusCode).toBe(401);
   });
-  it("menolak API key salah", async () => {
-    expect((await get("/v1/policies", { "x-curb-key": "salah" })).statusCode).toBe(401);
+  it("rejects a wrong API key", async () => {
+    expect((await get("/v1/policies", { "x-curb-key": "wrong" })).statusCode).toBe(401);
   });
-  it("menerima Bearer token", async () => {
+  it("accepts a Bearer token", async () => {
     expect((await get("/v1/policies", { authorization: `Bearer ${KEY}` })).statusCode).toBe(200);
   });
-  it("health terbuka tanpa auth", async () => {
+  it("health is open without auth", async () => {
     expect((await app.inject({ method: "GET", url: "/health" })).statusCode).toBe(200);
   });
-  it("api key tidak pernah disimpan mentah", async () => {
+  it("the API key is never stored in plain text", async () => {
     const p = await repo.projectByApiKeyHash(hashApiKey(KEY));
     expect(p!.apiKeyHash).not.toContain(KEY);
     expect(p!.apiKeyHash).toHaveLength(64);
@@ -46,33 +46,33 @@ describe("auth", () => {
 });
 
 describe("policy CRUD", () => {
-  it("membuat policy dan langsung terbaca", async () => {
+  it("creates a policy that is immediately readable", async () => {
     const created = await post("/v1/policies", policy());
     expect(created.statusCode).toBe(201);
     expect((created.json() as { id: string }).id).toMatch(/^pol_/);
     expect((await get("/v1/policies")).json()).toHaveLength(1);
   });
-  it("menolak policy tidak valid dengan 400", async () => {
-    const res = await post("/v1/policies", policy({ type: "tipe-ngaco" }));
+  it("rejects an invalid policy with 400", async () => {
+    const res = await post("/v1/policies", policy({ type: "bogus-type" }));
     expect(res.statusCode).toBe(400);
   });
-  it("update mengubah enabled", async () => {
+  it("update toggles enabled", async () => {
     const id = (await post("/v1/policies", policy())).json().id;
     await app.inject({ method: "PUT", url: `/v1/policies/${id}`, headers: H, payload: { enabled: false } });
     expect((await get(`/v1/policies/${id}`)).json().enabled).toBe(false);
   });
-  it("hapus policy", async () => {
+  it("deletes a policy", async () => {
     const id = (await post("/v1/policies", policy())).json().id;
     await app.inject({ method: "DELETE", url: `/v1/policies/${id}`, headers: H });
     expect((await get("/v1/policies")).json()).toHaveLength(0);
   });
-  it("404 untuk policy yang tidak ada", async () => {
-    expect((await get("/v1/policies/tidak-ada")).statusCode).toBe(404);
+  it("404 for a policy that does not exist", async () => {
+    expect((await get("/v1/policies/does-not-exist")).statusCode).toBe(404);
   });
 });
 
-describe("Decision API (acceptance M2: policy via API langsung ditegakkan)", () => {
-  it("tool_permission mode deny → DENY", async () => {
+describe("Decision API (M2 acceptance: a policy created via API is enforced)", () => {
+  it("tool_permission in deny mode → DENY", async () => {
     await post("/v1/policies", policy({
       type: "tool_permission", action: "deny", params: { tools: ["wipe_db"], mode: "deny" },
     }));
@@ -80,7 +80,7 @@ describe("Decision API (acceptance M2: policy via API langsung ditegakkan)", () 
     expect(d.json()).toMatchObject({ effect: "DENY" });
   });
 
-  it("tool yang tidak diatur tetap ALLOW", async () => {
+  it("an unregulated tool still gets ALLOW", async () => {
     await post("/v1/policies", policy({
       type: "tool_permission", action: "deny", params: { tools: ["wipe_db"], mode: "deny" },
     }));
@@ -88,7 +88,7 @@ describe("Decision API (acceptance M2: policy via API langsung ditegakkan)", () 
     expect(d.json().effect).toBe("ALLOW");
   });
 
-  it("step_limit menghitung step lintas panggilan", async () => {
+  it("step_limit counts steps across calls", async () => {
     await post("/v1/policies", policy({ type: "step_limit", params: { maxSteps: 3 } }));
     const effects = [];
     for (let i = 0; i < 5; i++) {
@@ -97,28 +97,28 @@ describe("Decision API (acceptance M2: policy via API langsung ditegakkan)", () 
     expect(effects).toEqual(["ALLOW", "ALLOW", "ALLOW", "DENY", "DENY"]);
   });
 
-  it("body tidak valid → 400", async () => {
+  it("an invalid body → 400", async () => {
     expect((await post("/v1/decisions", { kind: "ngaco", runId: "r1" })).statusCode).toBe(400);
   });
 
-  it("setiap keputusan tercatat sebagai event", async () => {
+  it("every decision is recorded as an event", async () => {
     await post("/v1/decisions", { kind: "tool_call", runId: "r1", toolName: "baca" });
     const events = (await get("/v1/events")).json();
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({ runId: "r1", effect: "ALLOW", kind: "tool_call" });
   });
 
-  it("run summary ikut terbentuk dari keputusan", async () => {
+  it("a run summary is formed from decisions", async () => {
     await post("/v1/decisions", { kind: "step", runId: "r1" });
     const runs = (await get("/v1/runs")).json();
     expect(runs[0]).toMatchObject({ id: "r1", projectId: "proj1" });
   });
 });
 
-describe("approval flow end-to-end (acceptance M2)", () => {
+describe("approval flow end-to-end (M2 acceptance)", () => {
   beforeEach(async () => {
     await post("/v1/policies", policy({
-      name: "hapus file butuh izin", type: "tool_permission", action: "ask",
+      name: "delete_file requires approval", type: "tool_permission", action: "ask",
       params: { tools: ["delete_file"], mode: "ask" },
     }));
   });
@@ -126,7 +126,7 @@ describe("approval flow end-to-end (acceptance M2)", () => {
   const ask = () =>
     post("/v1/decisions", { kind: "tool_call", runId: "r1", toolName: "delete_file", toolArgs: { path: "/tmp/a" } });
 
-  it("ASK membuat approval pending yang muncul di antrian", async () => {
+  it("ASK creates a pending approval that shows up in the queue", async () => {
     const d = (await ask()).json();
     expect(d.effect).toBe("ASK");
     expect(d.approvalId).toMatch(/^apr_/);
@@ -135,18 +135,18 @@ describe("approval flow end-to-end (acceptance M2)", () => {
     expect(queue[0]).toMatchObject({ toolName: "delete_file", status: "pending" });
   });
 
-  it("approve membebaskan pemanggil yang sedang long-poll", async () => {
+  it("approving releases the caller that is long-polling", async () => {
     const { approvalId } = (await ask()).json();
-    // SDK menggantung menunggu keputusan...
+    // the SDK hangs waiting for a decision...
     const waiting = get(`/v1/approvals/${approvalId}?wait=5000`);
     await new Promise((r) => setTimeout(r, 20));
-    // ...dashboard menekan Approve
-    await post(`/v1/approvals/${approvalId}/decide`, { approve: true, by: "budi" });
+    // ...the dashboard presses Approve
+    await post(`/v1/approvals/${approvalId}/decide`, { approve: true, by: "alice" });
     const resolved = (await waiting).json();
-    expect(resolved).toMatchObject({ status: "approved", decidedBy: "budi" });
+    expect(resolved).toMatchObject({ status: "approved", decidedBy: "alice" });
   });
 
-  it("deny juga membebaskan penunggu", async () => {
+  it("denying also releases the waiter", async () => {
     const { approvalId } = (await ask()).json();
     const waiting = get(`/v1/approvals/${approvalId}?wait=5000`);
     await new Promise((r) => setTimeout(r, 20));
@@ -154,42 +154,42 @@ describe("approval flow end-to-end (acceptance M2)", () => {
     expect((await waiting).json().status).toBe("denied");
   });
 
-  it("long-poll yang timeout mengembalikan status pending, bukan error", async () => {
+  it("a timed-out long-poll returns pending status, not an error", async () => {
     const { approvalId } = (await ask()).json();
     const res = await get(`/v1/approvals/${approvalId}?wait=30`);
     expect(res.statusCode).toBe(200);
     expect(res.json().status).toBe("pending");
   });
 
-  it("keputusan pertama menang, klik kedua tidak membalikkan", async () => {
+  it("the first decision wins; a second click does not reverse it", async () => {
     const { approvalId } = (await ask()).json();
-    await post(`/v1/approvals/${approvalId}/decide`, { approve: true, by: "budi" });
-    const second = await post(`/v1/approvals/${approvalId}/decide`, { approve: false, by: "siti" });
-    expect(second.json()).toMatchObject({ status: "approved", decidedBy: "budi" });
+    await post(`/v1/approvals/${approvalId}/decide`, { approve: true, by: "alice" });
+    const second = await post(`/v1/approvals/${approvalId}/decide`, { approve: false, by: "bob" });
+    expect(second.json()).toMatchObject({ status: "approved", decidedBy: "alice" });
   });
 
-  it("argumen tool disimpan sudah diringkas, rahasia tidak bocor", async () => {
+  it("tool arguments are stored redacted; secrets do not leak", async () => {
     await post("/v1/decisions", {
       kind: "tool_call", runId: "r2", toolName: "delete_file",
-      toolArgs: { path: "/etc/passwd", api_key: "sk-rahasia-banget" },
+      toolArgs: { path: "/etc/passwd", api_key: "sk-super-secret" },
     });
     const queue = (await get("/v1/approvals")).json();
     const args = JSON.stringify(queue[0].args);
-    expect(args).toContain("/etc/passwd"); // konteks untuk manusia tetap ada
-    expect(args).not.toContain("sk-rahasia-banget");
+    expect(args).toContain("/etc/passwd"); // the human still gets enough context
+    expect(args).not.toContain("sk-super-secret");
     expect(args).toContain("sha256:");
   });
 
-  it("approval milik project lain tidak terlihat", async () => {
+  it("another project's approval is not visible", async () => {
     const { approvalId } = (await ask()).json();
-    await repo.upsertProject({ id: "proj2", orgId: "org1", name: "lain", apiKeyHash: hashApiKey("kunci-lain") });
-    const res = await get(`/v1/approvals/${approvalId}`, { "x-curb-key": "kunci-lain" });
+    await repo.upsertProject({ id: "proj2", orgId: "org1", name: "other", apiKeyHash: hashApiKey("other-key") });
+    const res = await get(`/v1/approvals/${approvalId}`, { "x-curb-key": "other-key" });
     expect(res.statusCode).toBe(404);
   });
 });
 
-describe("ingest audit dari gateway", () => {
-  it("menerima batch dan meringkasnya jadi run", async () => {
+describe("audit ingest from the gateway", () => {
+  it("accepts a batch and summarises it into a run", async () => {
     const res = await post("/v1/events", {
       events: [
         { runId: "rg", ts: 1000, kind: "llm_call", effect: "ALLOW", costUsdSnapshot: 0.5, tokensSnapshot: 100 },
@@ -202,7 +202,7 @@ describe("ingest audit dari gateway", () => {
     expect(run.totalCostUsd).toBeCloseTo(2.1, 6);
   });
 
-  it("stats merangkum semuanya untuk dashboard", async () => {
+  it("stats summarise everything for the dashboard", async () => {
     await post("/v1/events", {
       events: [{ runId: "rg", ts: 1000, kind: "llm_call", effect: "DENY", policyId: "cc", costUsdSnapshot: 3 }],
     });
@@ -211,13 +211,13 @@ describe("ingest audit dari gateway", () => {
     expect(s.totalCostUsd).toBeCloseTo(3, 6);
   });
 
-  it("batch tidak valid ditolak 400", async () => {
+  it("an invalid batch is rejected with 400", async () => {
     expect((await post("/v1/events", { events: [{ runId: "x" }] })).statusCode).toBe(400);
   });
 });
 
 describe("dashboard", () => {
-  it("dilayani di root tanpa auth", async () => {
+  it("is served at the root without auth", async () => {
     const res = await app.inject({ method: "GET", url: "/" });
     expect(res.statusCode).toBe(200);
     expect(res.headers["content-type"]).toContain("text/html");
@@ -226,22 +226,22 @@ describe("dashboard", () => {
 });
 
 describe("fail mode", () => {
-  it("fail-closed menolak saat repo policy error", async () => {
+  it("fail-closed denies when the policy repo errors", async () => {
     const broken = new MemoryRepo();
     await broken.upsertProject({ id: "p", orgId: "o", name: "n", apiKeyHash: hashApiKey(KEY) });
     broken.listPolicies = async () => {
-      throw new Error("db mati");
+      throw new Error("db is down");
     };
     const a = buildApp({ repo: broken, store: new InMemoryRunStateStore(() => 0), now: () => 0 });
     const res = await a.inject({ method: "POST", url: "/v1/decisions", headers: H, payload: { kind: "step", runId: "r" } });
     expect(res.json()).toMatchObject({ effect: "DENY", policyId: "curb_fail_closed" });
   });
 
-  it("fail-open tetap meloloskan", async () => {
+  it("fail-open still lets it through", async () => {
     const broken = new MemoryRepo();
     await broken.upsertProject({ id: "p", orgId: "o", name: "n", apiKeyHash: hashApiKey(KEY) });
     broken.listPolicies = async () => {
-      throw new Error("db mati");
+      throw new Error("db is down");
     };
     const a = buildApp({ repo: broken, store: new InMemoryRunStateStore(() => 0), now: () => 0, failMode: "open" });
     const res = await a.inject({ method: "POST", url: "/v1/decisions", headers: H, payload: { kind: "step", runId: "r" } });

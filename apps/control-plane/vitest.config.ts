@@ -1,8 +1,8 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
-// why: paket workspace mengekspor ./dist untuk produksi; test dijalankan
-// langsung atas sumber supaya tidak perlu build dulu.
+// why: workspace packages export ./dist for production; tests run directly
+// against the sources so no build step is required first.
 const src = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 
 export default defineConfig({

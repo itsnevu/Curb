@@ -3,8 +3,8 @@ import type { Policy } from "@curb/shared";
 import { PostgresRepo } from "./postgres.js";
 
 /**
- * Integrasi lawan Postgres sungguhan (migrasi + semua query).
- * Dilewati kalau DATABASE_URL tidak diset:
+ * Integration against a real Postgres (migrations plus every query).
+ * Skipped when DATABASE_URL is unset:
  *   docker compose up -d postgres
  *   DATABASE_URL=postgresql://curb:curb@localhost:5432/curb pnpm --filter @curb/control-plane test
  */
@@ -32,29 +32,29 @@ suite("PostgresRepo", () => {
     await repo.close();
   });
 
-  it("migrasi idempoten — init() dua kali tidak error", async () => {
+  it("migrations are idempotent — calling init() twice does not error", async () => {
     await expect(repo.init()).resolves.toBeUndefined();
   });
 
-  it("project bisa dicari lewat hash api key", async () => {
+  it("a project can be found by API key hash", async () => {
     const p = await repo.projectByApiKeyHash(`h_${process.pid}`);
     expect(p).toMatchObject({ id: projectId });
   });
 
-  it("policy round-trip menjaga JSON scope/params/when", async () => {
+  it("a policy round-trip preserves scope/params/when JSON", async () => {
     await repo.putPolicy(projectId, { ...policy, when: { env: "prod" } });
     const back = await repo.getPolicy(projectId, policy.id);
     expect(back).toMatchObject({ params: { maxUsd: 2 }, scope: { project: projectId }, when: { env: "prod" } });
   });
 
-  it("putPolicy dua kali = update, bukan duplikat", async () => {
+  it("putPolicy twice updates rather than duplicates", async () => {
     await repo.putPolicy(projectId, { ...policy, name: "berubah" });
     const list = (await repo.listPolicies(projectId)).filter((p) => p.id === policy.id);
     expect(list).toHaveLength(1);
     expect(list[0].name).toBe("berubah");
   });
 
-  it("batch event tersimpan dan terbaca urut terbaru dulu", async () => {
+  it("an event batch is stored and read back newest-first", async () => {
     await repo.appendEvents([
       { runId, projectId, ts: 1_700_000_000_000, kind: "llm_call", effect: "ALLOW" },
       { runId, projectId, ts: 1_700_000_001_000, kind: "llm_call", effect: "DENY", policyId: policy.id, reason: "cap" },
@@ -63,7 +63,7 @@ suite("PostgresRepo", () => {
     expect(events[0]).toMatchObject({ effect: "DENY", reason: "cap" });
   });
 
-  it("run summary hanya naik, tidak pernah turun", async () => {
+  it("a run summary only goes up, never down", async () => {
     await repo.upsertRun({ id: runId, projectId, startedAt: 1_700_000_000_000, status: "running", totalTokens: 100, totalCostUsd: 1.5, stepCount: 2 });
     await repo.upsertRun({ id: runId, projectId, startedAt: 1_700_000_000_000, status: "blocked", totalTokens: 50, totalCostUsd: 0.1, stepCount: 1, verdict: policy.id });
     const run = await repo.getRun(projectId, runId);
@@ -71,12 +71,12 @@ suite("PostgresRepo", () => {
     expect(run!.totalCostUsd).toBeCloseTo(1.5, 6);
   });
 
-  it("decideApproval atomik — keputusan kedua tidak membalikkan", async () => {
+  it("decideApproval is atomic — a second decision does not reverse it", async () => {
     const id = `apr_${process.pid}`;
     await repo.createApproval({ id, runId, projectId, toolName: "delete_file", status: "pending", requestedAt: Date.now() });
     const [a, b] = await Promise.all([
-      repo.decideApproval(id, "approved", "budi", Date.now()),
-      repo.decideApproval(id, "denied", "siti", Date.now()),
+      repo.decideApproval(id, "approved", "alice", Date.now()),
+      repo.decideApproval(id, "denied", "bob", Date.now()),
     ]);
     expect(a!.status).toBe(b!.status);
     expect((await repo.getApproval(id))!.decidedBy).toBe(a!.decidedBy);

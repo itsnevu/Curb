@@ -1,9 +1,10 @@
 import type { PolicyEvaluator } from "./index.js";
 
 /**
- * cost_cap — trip kalau total biaya run melewati maxUsd.
+ * cost_cap — trips once a run's total cost passes maxUsd.
  * params: { maxUsd: number, window?: "run" }  (MVP: window=run)
- * Catatan: state.costUsd di-update oleh Gateway SETELAH tiap response provider.
+ * Note: state.costUsd is updated by the gateway AFTER each provider response,
+ * which is why this compares with >= rather than >.
  */
 export const costCap: PolicyEvaluator = (_ctx, policy, state) => {
   const maxUsd = Number(policy.params.maxUsd ?? Infinity);

@@ -12,7 +12,7 @@ export type PolicyEvaluator = (
   state: RunState,
 ) => Decision;
 
-/** Registry: nambah policy type = nambah satu entri di sini. */
+/** Registry: adding a policy type means adding one entry here. */
 export const POLICY_EVALUATORS: Record<PolicyType, PolicyEvaluator> = {
   cost_cap: costCap,
   loop_detect: loopDetect,

@@ -7,10 +7,10 @@ import { hashApiKey } from "./auth.js";
 import { MemoryRepo } from "./repo/memory.js";
 
 /**
- * Acceptance M3: SDK sungguhan berbicara ke control plane sungguhan lewat HTTP.
- * Tidak ada yang dipalsukan selain database.
+ * M3 acceptance: the real SDK talks to the real control plane over HTTP.
+ * Nothing is faked except the database.
  */
-const KEY = "kunci-e2e";
+const KEY = "e2e-key";
 let app: FastifyInstance;
 let repo: MemoryRepo;
 let curb: Curb;
@@ -42,43 +42,43 @@ const decide = (id: string, approve: boolean) =>
   app.inject({ method: "POST", url: `/v1/approvals/${id}/decide`, headers: H, payload: { approve, by: "operator" } });
 
 describe("agent + SDK + control plane, end-to-end", () => {
-  it("tool sensitif ASK → menunggu → jalan setelah di-approve dari dashboard", async () => {
+  it("a sensitive tool asks, waits, and runs only after dashboard approval", async () => {
     await addPolicy({
       name: "delete_file requires approval", type: "tool_permission", action: "ask",
       params: { tools: ["delete_file"], mode: "ask" },
     });
 
-    const efekSamping: string[] = [];
+    const sideEffects: string[] = [];
     const deleteFile = curb.wrapTool(
       async (path: string) => {
-        efekSamping.push(path);
-        return `terhapus: ${path}`;
+        sideEffects.push(path);
+        return `deleted: ${path}`;
       },
       { name: "delete_file", sensitivity: "high" },
     );
 
-    const agent = curb.run(async () => deleteFile("/tmp/penting.txt"), "run-e2e");
+    const agent = curb.run(async () => deleteFile("/tmp/important.txt"), "run-e2e");
 
-    // Tool masih ditahan; approval muncul di antrian dashboard.
+    // The tool is still held; the approval shows up in the dashboard queue.
     await vi.waitFor(async () => expect(await queue()).toHaveLength(1));
-    expect(efekSamping).toEqual([]);
+    expect(sideEffects).toEqual([]);
 
     const [pending] = await queue();
     expect(pending.toolName).toBe("delete_file");
     await decide(pending.id, true);
 
-    expect(await agent).toBe("terhapus: /tmp/penting.txt");
-    expect(efekSamping).toEqual(["/tmp/penting.txt"]);
+    expect(await agent).toBe("deleted: /tmp/important.txt");
+    expect(sideEffects).toEqual(["/tmp/important.txt"]);
   });
 
-  it("deny dari dashboard → agent dapat PolicyViolation, tool tidak pernah jalan", async () => {
+  it("denying from the dashboard → the agent gets PolicyViolation and the tool never runs", async () => {
     await addPolicy({
       name: "delete_file requires approval", type: "tool_permission", action: "ask",
       params: { tools: ["delete_file"], mode: "ask" },
     });
 
-    const efekSamping: string[] = [];
-    const deleteFile = curb.wrapTool(async (p: string) => efekSamping.push(p), {
+    const sideEffects: string[] = [];
+    const deleteFile = curb.wrapTool(async (p: string) => sideEffects.push(p), {
       name: "delete_file", sensitivity: "high",
     });
 
@@ -89,10 +89,10 @@ describe("agent + SDK + control plane, end-to-end", () => {
     const err = await agent;
     expect(err).toBeInstanceOf(PolicyViolation);
     expect(String(err)).toContain("operator");
-    expect(efekSamping).toEqual([]);
+    expect(sideEffects).toEqual([]);
   });
 
-  it("policy mode deny langsung melempar tanpa approval", async () => {
+  it("a deny-mode policy throws immediately, with no approval", async () => {
     await addPolicy({
       name: "never touch the db", type: "tool_permission", action: "deny",
       params: { tools: ["wipe_db"], mode: "deny" },
@@ -102,22 +102,22 @@ describe("agent + SDK + control plane, end-to-end", () => {
     expect(await queue()).toHaveLength(0);
   });
 
-  it("step_limit menghentikan agent yang berputar", async () => {
+  it("step_limit stops an agent that is spinning", async () => {
     await addPolicy({ name: "max 3 steps", type: "step_limit", action: "deny", params: { maxSteps: 3 } });
 
-    let langkah = 0;
-    const jalan = curb.run(async () => {
+    let steps = 0;
+    const running = curb.run(async () => {
       for (let i = 0; i < 10; i++) {
         await curb.step();
-        langkah++;
+        steps++;
       }
     }, "run-loop");
 
-    await expect(jalan).rejects.toThrow(PolicyViolation);
-    expect(langkah).toBe(3);
+    await expect(running).rejects.toThrow(PolicyViolation);
+    expect(steps).toBe(3);
   });
 
-  it("semua keputusan terekam di audit log", async () => {
+  it("every decision is recorded in the audit log", async () => {
     await addPolicy({ name: "max 1 step", type: "step_limit", action: "deny", params: { maxSteps: 1 } });
     await curb.run(async () => {
       await curb.step();

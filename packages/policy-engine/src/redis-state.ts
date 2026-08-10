@@ -6,7 +6,7 @@ import type {
 } from "@curb/shared";
 import { WINDOW_CAPS, emptyState } from "./state.js";
 
-/** Subset ioredis yang kita pakai — supaya gampang di-mock & tidak mengikat versi. */
+/** The subset of ioredis we use — easy to mock, and not tied to a specific version. */
 export interface RedisLike {
   hgetall(key: string): Promise<Record<string, string>>;
   hsetnx(key: string, field: string, value: string | number): Promise<number>;
@@ -23,15 +23,16 @@ export interface RedisLike {
 const NUMERIC_WINDOWS: WindowKey[] = ["callTimestamps"];
 
 export interface RedisRunStateStoreOptions {
-  /** TTL state per run. Default 24 jam. */
+  /** Per-run state TTL. Defaults to 24 hours. */
   ttlSeconds?: number;
   keyPrefix?: string;
   now?: () => number;
 }
 
 /**
- * State store produksi. Counter naik lewat HINCRBY/HINCRBYFLOAT supaya atomik
- * lintas instance gateway (why: read-modify-write bikin cost cap bocor saat concurrent).
+ * Production state store. Counters increment through HINCRBY/HINCRBYFLOAT so they
+ * stay atomic across gateway instances — a read-modify-write would let concurrent
+ * requests leak past a cost cap.
  */
 export class RedisRunStateStore implements RunStateStore {
   private ttl: number;
@@ -81,7 +82,7 @@ export class RedisRunStateStore implements RunStateStore {
     return base;
   }
 
-  /** Dipakai jarang (bootstrap/test). Jalur panas pakai bump()/pushWindow(). */
+  /** Rarely used (bootstrap and tests). The hot path uses bump()/pushWindow(). */
   async save(state: RunState): Promise<void> {
     await this.redis.hset(
       this.key(state.runId),

@@ -49,8 +49,8 @@ export interface RunSummary {
 }
 
 /**
- * Satu-satunya pintu ke penyimpanan. Ada dua implementasi (Postgres & in-memory)
- * supaya seluruh API bisa diuji end-to-end tanpa database hidup.
+ * The only door to storage. Two implementations exist (Postgres and in-memory) so the
+ * whole API can be tested end-to-end without a live database.
  */
 export interface Repo {
   init(): Promise<void>;

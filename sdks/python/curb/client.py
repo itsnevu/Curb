@@ -1,4 +1,4 @@
-"""Pembungkus tipis Decision & Approval API. Tidak menyimpan state."""
+"""A thin wrapper over the Decision and Approval APIs. Holds no state."""
 from __future__ import annotations
 
 import os
@@ -35,12 +35,12 @@ class CurbClient:
         return r.json()
 
     def wait_approval(self, approval_id: str, wait_ms: int) -> Dict[str, Any]:
-        """Long-poll: server menggantung koneksi sampai ada keputusan atau wait_ms habis."""
+        """Long-poll: the server holds the connection until a decision arrives or wait_ms elapses."""
         r = self._http.get(
             f"{self.base_url}/v1/approvals/{approval_id}",
             params={"wait": wait_ms},
             headers=self._headers,
-            # timeout HTTP dibuat lebih longgar dari wait_ms supaya bukan kita yang memutus duluan
+            # the HTTP timeout is looser than wait_ms so we are never the side that hangs up first
             timeout=wait_ms / 1000 + 5,
         )
         r.raise_for_status()

@@ -1,20 +1,20 @@
 import type { PolicyEvaluator } from "./index.js";
 
 /**
- * loop_detect — dua sinyal:
- *  1) semantic repeat: signature messages sama berulang >= maxRepeats dalam window.
- *  2) tool-cycle: pola tool berulang (mis. A,B,A,B,A,B).
+ * loop_detect — two signals:
+ *  1) semantic repeat: the same message signature appears >= maxRepeats times in the window.
+ *  2) tool cycle: a repeating tool pattern (e.g. A,B,A,B,A,B).
  * params: { maxRepeats?: number (default 3), signatureWindow?: number (default 10) }
  *
- * Signature dihitung & di-push ke state.sigWindow / state.toolWindow oleh caller
- * (Gateway/SDK) SEBELUM evaluate. Di sini kita hanya membaca window.
+ * Signatures are computed and pushed onto state.sigWindow / state.toolWindow by the
+ * caller (gateway or SDK) BEFORE evaluate runs. Here we only read the windows.
  */
 export const loopDetect: PolicyEvaluator = (_ctx, policy, state) => {
   const maxRepeats = Number(policy.params.maxRepeats ?? 3);
   const signatureWindow = Number(policy.params.signatureWindow ?? 10);
 
-  // 1) semantic repeat — hanya lihat `signatureWindow` call terakhir,
-  // why: run panjang yang sesekali mengulang pesan bukan loop.
+  // 1) semantic repeat — only look at the last `signatureWindow` calls.
+  // why: a long run that occasionally repeats a message is not a loop.
   const window = state.sigWindow.slice(-signatureWindow);
   const last = window.at(-1);
   if (last) {
@@ -28,7 +28,7 @@ export const loopDetect: PolicyEvaluator = (_ctx, policy, state) => {
     }
   }
 
-  // 2) tool-cycle (deteksi pola periodik pendek)
+  // 2) tool cycle (detect short periodic patterns)
   if (hasRepeatingCycle(state.toolWindow, maxRepeats)) {
     return {
       effect: "DENY",
@@ -40,7 +40,7 @@ export const loopDetect: PolicyEvaluator = (_ctx, policy, state) => {
   return { effect: "ALLOW" };
 };
 
-/** True kalau ada blok berukuran 1..3 yang berulang >= repeats kali di ekor window. */
+/** True if a block of size 1..3 repeats >= `repeats` times at the tail of the window. */
 function hasRepeatingCycle(seq: string[], repeats: number): boolean {
   for (let size = 1; size <= 3; size++) {
     if (seq.length < size * repeats) continue;

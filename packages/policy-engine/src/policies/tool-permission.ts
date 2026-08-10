@@ -1,9 +1,11 @@
 import type { PolicyEvaluator } from "./index.js";
 
 /**
- * tool_permission — guardrail / ask-before-acting. Hanya untuk ctx.kind === "tool_call".
+ * tool_permission — the guardrail / ask-before-acting policy. Only applies when
+ * ctx.kind === "tool_call".
  * params: { tools?: string[], sensitivity?: "low"|"medium"|"high", mode: "ask"|"deny"|"allow" }
- * Kalau tool cocok → terapkan mode. "ask" → ASK (SDK bikin approval & tahan eksekusi).
+ * If the tool matches, the mode is applied. "ask" → ASK, and the SDK creates an
+ * approval and holds execution until a human decides.
  */
 export const toolPermission: PolicyEvaluator = (ctx, policy) => {
   if (ctx.kind !== "tool_call") return { effect: "ALLOW" };

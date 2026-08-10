@@ -3,14 +3,14 @@ import { Redis } from "ioredis";
 import { RedisRunStateStore, type RedisLike } from "./redis-state.js";
 
 /**
- * Integrasi lawan Redis sungguhan. Dilewati kalau REDIS_URL tidak diset,
- * supaya `pnpm test` tetap jalan di mesin tanpa Redis.
+ * Integration against a real Redis. Skipped when REDIS_URL is unset so `pnpm test`
+ * still runs on a machine without Redis.
  *   REDIS_URL=redis://localhost:6379 pnpm --filter @curb/policy-engine test
  */
 const url = process.env.REDIS_URL;
 const suite = url ? describe : describe.skip;
 
-suite("RedisRunStateStore lawan Redis sungguhan", () => {
+suite("RedisRunStateStore against a real Redis", () => {
   let redis: Redis;
   let store: RedisRunStateStore;
   const runId = `test-${process.pid}`;
@@ -26,7 +26,7 @@ suite("RedisRunStateStore lawan Redis sungguhan", () => {
     await redis.quit();
   });
 
-  it("counter float tetap presisi lewat HINCRBYFLOAT", async () => {
+  it("float counters stay precise through HINCRBYFLOAT", async () => {
     await store.bump(runId, { costUsd: 0.000123, tokens: 7 });
     await store.bump(runId, { costUsd: 0.000877, tokens: 3 });
     const s = await store.get(runId);
@@ -34,7 +34,7 @@ suite("RedisRunStateStore lawan Redis sungguhan", () => {
     expect(s.tokens).toBe(10);
   });
 
-  it("50 bump paralel tidak ada yang hilang", async () => {
+  it("50 parallel bumps lose nothing", async () => {
     await store.reset(runId);
     await Promise.all(Array.from({ length: 50 }, () => store.bump(runId, { costUsd: 0.02, steps: 1 })));
     const s = await store.get(runId);
@@ -42,13 +42,13 @@ suite("RedisRunStateStore lawan Redis sungguhan", () => {
     expect(s.stepCount).toBe(50);
   });
 
-  it("window dipotong oleh LTRIM dan urutannya terjaga", async () => {
+  it("LTRIM trims the window and order is preserved", async () => {
     await store.reset(runId);
     for (const v of ["a", "b", "c", "d", "e"]) await store.pushWindow(runId, "sigWindow", v, 3);
     expect((await store.get(runId)).sigWindow).toEqual(["c", "d", "e"]);
   });
 
-  it("TTL terpasang pada key run", async () => {
+  it("a TTL is set on the run key", async () => {
     await store.bump(runId, { steps: 1 });
     const ttl = await redis.ttl(`curb:run:${runId}`);
     expect(ttl).toBeGreaterThan(0);

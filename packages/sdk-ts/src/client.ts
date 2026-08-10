@@ -14,12 +14,12 @@ export type Fetcher = typeof fetch;
 export interface ClientOptions {
   baseUrl?: string;
   apiKey?: string;
-  /** Timeout satu request HTTP (bukan lama menunggu approval). */
+  /** Timeout for a single HTTP request (not how long we wait for an approval). */
   requestTimeoutMs?: number;
   fetch?: Fetcher;
 }
 
-/** Pembungkus tipis Decision & Approval API. Tidak menyimpan state. */
+/** A thin wrapper over the Decision and Approval APIs. Holds no state. */
 export class CurbClient {
   private base: string;
   private apiKey: string;
@@ -38,8 +38,9 @@ export class CurbClient {
   }
 
   /**
-   * Long-poll: server menggantung koneksi sampai ada keputusan atau `waitMs` habis.
-   * Timeout HTTP dibuat lebih longgar dari waitMs supaya bukan kita yang memutus duluan.
+   * Long-poll: the server holds the connection until a decision arrives or `waitMs`
+   * elapses. The HTTP timeout is deliberately looser than waitMs so we are never the
+   * side that hangs up first.
    */
   async waitApproval(id: string, waitMs: number): Promise<ApprovalView> {
     return this.json<ApprovalView>("GET", `/v1/approvals/${id}?wait=${waitMs}`, undefined, waitMs + 5_000);

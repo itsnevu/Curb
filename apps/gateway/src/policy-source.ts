@@ -3,10 +3,10 @@ import { request } from "undici";
 import { PolicySchema, type Policy } from "@curb/shared";
 
 /**
- * Dari mana gateway mengambil policy.
- * Urutan: control-plane (kalau CONTROL_PLANE_URL diset) → file → env inline → kosong.
- * Cache last-known-good supaya control-plane yang sekejap down tidak langsung
- * mematikan semua agent (fail-closed baru berlaku kalau cache pun tidak ada).
+ * Where the gateway gets its policies.
+ * Order: control plane (if CONTROL_PLANE_URL is set) → file → inline env → empty.
+ * Keeps a last-known-good cache so a brief control-plane outage doesn't immediately
+ * halt every agent; fail-closed only kicks in when there is no cache either.
  */
 export class PolicySource {
   private cache: Policy[] | null = null;
@@ -28,7 +28,7 @@ export class PolicySource {
     return (this.opts.now ?? Date.now)();
   }
 
-  /** @throws kalau tidak ada policy yang bisa dipercaya (caller menerapkan fail mode). */
+  /** @throws when no trustworthy policy set is available; the caller applies the fail mode. */
   async load(): Promise<Policy[]> {
     if (this.cache && this.nowMs() - this.fetchedAt < this.ttl) return this.cache;
 
@@ -65,8 +65,8 @@ export class PolicySource {
 
 export function parsePolicies(body: unknown): Policy[] {
   const raw = Array.isArray(body) ? body : ((body as { policies?: unknown[] })?.policies ?? []);
-  // Policy yang tidak valid dibuang (bukan menjatuhkan semuanya), tapi dicatat
-  // oleh caller lewat selisih jumlah.
+  // Drop individual invalid policies rather than rejecting the whole set;
+  // the caller can notice via the difference in count.
   return raw.flatMap((p) => {
     const parsed = PolicySchema.safeParse(p);
     return parsed.success ? [parsed.data] : [];
@@ -80,7 +80,7 @@ function loadLocalPolicies(): Policy[] {
       return parsePolicies(JSON.parse(readFileSync(process.env.CURB_POLICIES_FILE, "utf8")));
     }
   } catch {
-    // biarkan kosong; tanpa policy gateway hanya meneruskan (tidak ada aturan = tidak ada larangan)
+    // leave it empty; with no policies the gateway simply forwards (no rules, no restrictions)
   }
   return [];
 }

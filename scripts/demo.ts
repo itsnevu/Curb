@@ -10,8 +10,8 @@ import { PolicySource } from "../apps/gateway/src/policy-source.js";
 import { startFakeProvider } from "./fake-provider.js";
 
 /**
- * Demo 60 detik: satu proses menjalankan control-plane, gateway, provider palsu,
- * dan tiga agent yang masing-masing memicu satu jenis perlindungan.
+ * 60-second demo: a single process runs the control plane, the gateway, a fake provider,
+ * and three agents that each trigger one kind of protection.
  */
 const KEY = "demo-key";
 const c = {
@@ -85,7 +85,7 @@ async function main() {
   // ── B. Loop breaker ────────────────────────────────────────────────────
   c.judul("B. Infinite loop — identical repeated messages detected");
   for (let i = 1; i <= 5; i++) {
-    const r = await llm("demo-loop", "pertanyaan yang sama persis");
+    const r = await llm("demo-loop", "the exact same question");
     if (r.status === 200) c.ok(`call ${i} passed (identical message)`);
     else {
       c.blok(`call ${i} BLOCKED — ${r.body.error.message}`);
@@ -133,7 +133,7 @@ async function main() {
   c.blok(`denied by operator → ${err instanceof PolicyViolation ? err.message : err}`);
   c.info(`actually deleted: ${JSON.stringify(terhapus)}`);
 
-  await audit.flush(); // pastikan event gateway sudah sampai sebelum kita membaca statistik
+  await audit.flush(); // make sure gateway events have landed before reading stats
 
   // ── Ringkasan ──────────────────────────────────────────────────────────
   const stats = await (await fetch(`${cpUrl}/v1/stats`, { headers: { "x-curb-key": KEY } })).json() as any;

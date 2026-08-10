@@ -1,9 +1,9 @@
 import type { PolicyEvaluator } from "./index.js";
 
 /**
- * step_limit — DENY kalau jumlah step run melewati maxSteps. params: { maxSteps }
- * why: caller sudah menaikkan stepCount SEBELUM evaluate, jadi `>` berarti
- * "maxSteps step pertama boleh jalan, yang berikutnya ditahan".
+ * step_limit — DENY once a run exceeds maxSteps. params: { maxSteps }
+ * why: the caller already incremented stepCount BEFORE evaluate, so `>` means
+ * "the first maxSteps steps are allowed, the next one is held".
  */
 export const stepLimit: PolicyEvaluator = (_ctx, policy, state) => {
   const maxSteps = Number(policy.params.maxSteps ?? Infinity);

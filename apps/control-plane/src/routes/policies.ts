@@ -4,7 +4,7 @@ import type { FastifyInstance } from "fastify";
 import { PolicySchema } from "@curb/shared";
 import type { Repo } from "../repo/types.js";
 
-/** id boleh dibuat server; sisanya wajib sesuai PolicySchema. */
+/** The server may generate the id; everything else must satisfy PolicySchema. */
 const CreateSchema = PolicySchema.extend({
   id: z.string().min(1).optional(),
   enabled: z.boolean().default(true),

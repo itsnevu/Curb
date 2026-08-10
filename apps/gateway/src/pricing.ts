@@ -1,16 +1,16 @@
 import { readFileSync } from "node:fs";
 
 export interface ModelPrice {
-  /** USD per 1 token input */
+  /** USD per input token */
   in: number;
-  /** USD per 1 token output */
+  /** USD per output token */
   out: number;
 }
 
 /**
- * Harga per 1 JUTA token (USD), lebih enak dibaca & di-override.
- * Sumber: halaman harga publik OpenAI & Anthropic. Bisa diganti tanpa deploy
- * lewat CURB_PRICING_FILE (JSON) atau CURB_PRICING (JSON inline).
+ * Price per ONE MILLION tokens (USD) — easier to read and to override.
+ * Source: the public OpenAI and Anthropic pricing pages. Override without a deploy
+ * via CURB_PRICING_FILE (a JSON file) or CURB_PRICING (inline JSON).
  */
 export const DEFAULT_PRICING_PER_MTOK: Record<string, ModelPrice> = {
   // OpenAI
@@ -26,8 +26,8 @@ export const DEFAULT_PRICING_PER_MTOK: Record<string, ModelPrice> = {
   "claude-sonnet-4": { in: 3, out: 15 },
   "claude-3-5-haiku": { in: 0.8, out: 4 },
   "claude-3-haiku": { in: 0.25, out: 1.25 },
-  // Fallback kalau model tidak dikenal — sengaja mahal (fail-safe:
-  // lebih baik over-estimate lalu breaker nyala, daripada cost cap bocor).
+  // Fallback for unknown models — deliberately expensive. Fail-safe: over-estimating
+  // and tripping the breaker early beats letting a cost cap leak.
   default: { in: 5, out: 15 },
 };
 
@@ -40,7 +40,7 @@ export class PriceTable {
     );
   }
 
-  /** Cocokkan model persis, lalu prefix terpanjang (mis. "gpt-4o-2024-08-06" → "gpt-4o"). */
+  /** Match the model exactly, then by longest prefix (e.g. "gpt-4o-2024-08-06" → "gpt-4o"). */
   priceFor(model: string | undefined): ModelPrice {
     if (!model) return this.table.default;
     if (this.table[model]) return this.table[model];
@@ -72,8 +72,8 @@ function readOverride(): Record<string, ModelPrice> | null {
       return JSON.parse(readFileSync(process.env.CURB_PRICING_FILE, "utf8"));
     }
   } catch {
-    // why: pricing rusak tidak boleh menjatuhkan gateway — pakai default,
-    // yang sengaja lebih mahal sehingga tetap fail-safe.
+    // why: broken pricing config must not take the gateway down — fall back to the
+    // defaults, which are deliberately expensive and therefore still fail-safe.
   }
   return null;
 }

@@ -2,8 +2,8 @@ import { request } from "undici";
 import type { UpstreamResponse } from "./app.js";
 
 /**
- * Forwarder nyata ke provider. Dipisah dari app.ts supaya test bisa
- * menyuntik upstream palsu tanpa jaringan.
+ * The real forwarder to the provider. Kept out of app.ts so tests can inject a
+ * fake upstream and run without network access.
  */
 export async function forwardUpstream(
   url: string,
@@ -15,7 +15,7 @@ export async function forwardUpstream(
     method: "POST",
     headers: { ...headers, "content-type": "application/json" },
     body: JSON.stringify(body),
-    // why: streaming bisa lama menganggur di antara token — jangan putus.
+    // why: streams can idle for a long time between tokens — don't cut them off.
     headersTimeout: streaming ? 120_000 : 60_000,
     bodyTimeout: streaming ? 0 : 120_000,
   });

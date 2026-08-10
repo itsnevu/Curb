@@ -1,7 +1,7 @@
 import { nowOf } from "./now.js";
 import type { PolicyEvaluator } from "./index.js";
 
-/** time_limit — DENY kalau umur run melewati maxWallClockMs. params: { maxWallClockMs } */
+/** time_limit — DENY once a run is older than maxWallClockMs. params: { maxWallClockMs } */
 export const timeLimit: PolicyEvaluator = (ctx, policy, state) => {
   const maxMs = Number(policy.params.maxWallClockMs ?? Infinity);
   const now = nowOf(ctx, state);

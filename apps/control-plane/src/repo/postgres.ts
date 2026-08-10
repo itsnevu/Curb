@@ -21,7 +21,7 @@ export class PostgresRepo implements Repo {
     this.pool = new Pool({ connectionString, max: 10 });
   }
 
-  /** Jalankan migrasi yang belum pernah dijalankan. Idempoten & aman dipanggil tiap boot. */
+  /** Run any migrations that haven't run yet. Idempotent and safe to call on every boot. */
   async init(): Promise<void> {
     await this.pool.query(
       `CREATE TABLE IF NOT EXISTS _curb_migrations (
@@ -161,8 +161,8 @@ export class PostgresRepo implements Repo {
   }
 
   async decideApproval(id: string, status: ApprovalStatus, by: string, at: number): Promise<Approval | null> {
-    // why: WHERE status='pending' bikin keputusan pertama menang secara atomik,
-    // tanpa transaksi eksplisit, walau dua orang klik bersamaan.
+    // why: WHERE status='pending' makes the first decision win atomically, with no
+    // explicit transaction, even if two people click at the same moment.
     const r = await this.pool.query(
       `UPDATE approvals SET status=$2, decided_by=$3, decided_at=$4
        WHERE id=$1 AND status='pending' RETURNING *`,

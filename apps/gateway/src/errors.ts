@@ -1,7 +1,7 @@
 import type { Decision } from "@curb/shared";
 import type { Provider } from "./providers.js";
 
-/** Policy mana yang artinya "dilarang" (403) vs "terlalu banyak/mahal" (429). */
+/** Which policies mean "forbidden" (403) rather than "too many / too expensive" (429). */
 const FORBIDDEN_POLICIES = ["tool_permission"];
 
 export function statusForDecision(decision: Decision, policyType?: string): number {
@@ -10,8 +10,8 @@ export function statusForDecision(decision: Decision, policyType?: string): numb
 }
 
 /**
- * Bentuk error ditiru dari provider supaya SDK klien (openai/anthropic)
- * memunculkannya sebagai error normal, bukan crash parsing.
+ * The error shape mirrors the provider's own, so client SDKs (openai/anthropic)
+ * surface it as a normal error instead of crashing while parsing.
  */
 export function errorBody(provider: Provider, decision: Decision) {
   const message = `Curb policy: ${decision.reason ?? "request blocked"}`;

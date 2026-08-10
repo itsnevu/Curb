@@ -1,8 +1,8 @@
 import type { Context, RunState } from "@curb/shared";
 
 /**
- * Waktu evaluasi. Engine tidak boleh memanggil Date.now() sendiri (harus murni),
- * jadi caller meng-inject lewat ctx.now. Fallback ke startedAt = "belum lewat waktu".
+ * Evaluation time. The engine must never call Date.now() itself (it has to stay pure),
+ * so callers inject it via ctx.now. Falling back to startedAt means "no time has passed".
  */
 export function nowOf(ctx: Context, state: RunState): number {
   return Number(ctx.now ?? ctx.meta?.now ?? state.startedAt);

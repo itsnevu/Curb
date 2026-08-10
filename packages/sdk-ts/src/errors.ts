@@ -1,6 +1,6 @@
 import type { Decision } from "@curb/shared";
 
-/** Dilempar saat policy menolak sebuah aksi. Tangkap ini untuk menangani penolakan. */
+/** Thrown when a policy denies an action. Catch this to handle refusals. */
 export class PolicyViolation extends Error {
   readonly decision: Decision;
   readonly policyId?: string;
@@ -15,7 +15,7 @@ export class PolicyViolation extends Error {
   }
 }
 
-/** Approval tidak diputuskan sampai batas waktu. Perlakuannya mengikuti failMode. */
+/** No approval decision arrived before the deadline. Handled according to failMode. */
 export class ApprovalTimeout extends PolicyViolation {
   constructor(approvalId: string, waitedMs: number, toolName?: string) {
     super(
