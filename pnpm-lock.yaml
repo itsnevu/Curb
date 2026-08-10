@@ -42,6 +42,9 @@ importers:
         specifier: ^3.23.0
         version: 3.25.76
     devDependencies:
+      '@curb/sdk':
+        specifier: workspace:*
+        version: link:../../packages/sdk-ts
       '@types/pg':
         specifier: ^8.21.0
         version: 8.21.0
@@ -96,6 +99,9 @@ importers:
       '@types/node':
         specifier: ^26.2.0
         version: 26.2.0
+      vitest:
+        specifier: ^2.0.0
+        version: 2.1.9(@types/node@26.2.0)
 
   packages/shared:
     dependencies:

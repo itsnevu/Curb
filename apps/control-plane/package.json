@@ -19,6 +19,7 @@
   },
   "devDependencies": {
     "@types/pg": "^8.21.0",
-    "vitest": "^2.0.0"
+    "vitest": "^2.0.0",
+    "@curb/sdk": "workspace:*"
   }
 }
