@@ -11,7 +11,7 @@ and destructive tool calls — enforced by one policy engine, at every point whe
 your agent touches the outside world.
 
 [![CI](https://github.com/itsnevu/Curb/actions/workflows/ci.yml/badge.svg)](https://github.com/itsnevu/Curb/actions/workflows/ci.yml)
-[![tests](https://img.shields.io/badge/tests-177%20passing-2f6f4e)](#development)
+[![tests](https://img.shields.io/badge/tests-188%20passing-2f6f4e)](#development)
 [![typescript](https://img.shields.io/badge/TypeScript-strict-3178c6)](#)
 [![python](https://img.shields.io/badge/Python-3.11%2B-3776ab)](#python-sdk)
 [![license](https://img.shields.io/badge/license-MIT-6b6862)](LICENSE)
@@ -393,7 +393,7 @@ Zod / Pydantic · Vitest / pytest · pnpm workspaces.
 
 ```bash
 pnpm install
-pnpm test          # 157 TypeScript tests
+pnpm test          # 157 TypeScript tests (168 with Postgres + Redis running)
 pnpm typecheck     # build + tsc --noEmit across every package
 pnpm demo          # end-to-end demo in a single process
 
@@ -402,7 +402,9 @@ cd sdks/python && python -m venv .venv && .venv/bin/pip install -e ".[dev]"
 .venv/bin/python -m pytest -q        # 20 tests
 ```
 
-Integration tests against real databases are opt-in — skipped when the env var is absent:
+Integration tests against real databases are opt-in — skipped when the env var is absent.
+CI always runs them, plus a job that builds the Docker images, boots the whole stack and
+smoke-tests it, so nothing below is left unverified:
 
 ```bash
 docker compose up -d postgres redis
@@ -444,7 +446,7 @@ OpenAI and Anthropic message APIs, including streaming. Any OpenAI-compatible en
 pointing `OPENAI_UPSTREAM` at it.
 
 **Is it production-ready?**
-The engine, gateway, SDKs, and approval flow are covered by 177 tests including end-to-end runs,
+The engine, gateway, SDKs, and approval flow are covered by 188 tests including end-to-end runs,
 and CI exercises Postgres, Redis, and the full Docker Compose stack on every push. Two honest
 caveats: it has never been pointed at a real OpenAI or Anthropic endpoint (only a faithful fake
 upstream), and it is not multi-region or HA. The SDKs are not published to npm/PyPI yet.
