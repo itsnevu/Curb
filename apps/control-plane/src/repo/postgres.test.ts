@@ -24,7 +24,7 @@ suite("PostgresRepo", () => {
   beforeAll(async () => {
     repo = new PostgresRepo(url!);
     await repo.init();
-    await repo.upsertProject({ id: projectId, orgId: `o_${process.pid}`, name: "test", apiKeyHash: `h_${process.pid}` });
+    await repo.upsertProject({ id: projectId, orgId: `o_${process.pid}`, name: "test" });
   });
 
   afterAll(async () => {
@@ -36,9 +36,31 @@ suite("PostgresRepo", () => {
     await expect(repo.init()).resolves.toBeUndefined();
   });
 
-  it("a project can be found by API key hash", async () => {
-    const p = await repo.projectByApiKeyHash(`h_${process.pid}`);
-    expect(p).toMatchObject({ id: projectId });
+  it("an API key resolves to its org, project and role", async () => {
+    const hash = `h_${process.pid}`;
+    await repo.createApiKey({
+      id: `key_${process.pid}`,
+      orgId: `o_${process.pid}`,
+      projectId,
+      name: "test",
+      keyHash: hash,
+      role: "operator",
+      createdAt: Date.now(),
+    });
+    expect(await repo.apiKeyByHash(hash)).toMatchObject({ projectId, role: "operator" });
+  });
+
+  it("a revoked key stops resolving", async () => {
+    const hash = `hr_${process.pid}`;
+    const id = `keyr_${process.pid}`;
+    await repo.createApiKey({
+      id, orgId: `o_${process.pid}`, projectId, name: "doomed",
+      keyHash: hash, role: "viewer", createdAt: Date.now(),
+    });
+    expect(await repo.revokeApiKey(`o_${process.pid}`, id, Date.now())).toBe(true);
+    expect(await repo.apiKeyByHash(hash)).toBeNull();
+    // Revoking twice is not an error the caller should act on, but it changed nothing.
+    expect(await repo.revokeApiKey(`o_${process.pid}`, id, Date.now())).toBe(false);
   });
 
   it("a policy round-trip preserves scope/params/when JSON", async () => {

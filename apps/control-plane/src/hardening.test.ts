@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { InMemoryRunStateStore } from "@curb/policy-engine";
 import { buildApp } from "./app.js";
-import { hashApiKey } from "./auth.js";
+import { provisionProject } from "./auth.js";
 import { expireApprovals } from "./expiry.js";
 import { MemoryRepo } from "./repo/memory.js";
 import { ApprovalHub } from "./approval-hub.js";
@@ -15,7 +15,7 @@ let clock = 1_000;
 
 async function makeApp(over: Partial<Parameters<typeof buildApp>[0]> = {}): Promise<FastifyInstance> {
   repo = new MemoryRepo();
-  await repo.upsertProject({ id: "proj1", orgId: "org1", name: "test", apiKeyHash: hashApiKey(KEY) });
+  await provisionProject(repo, { projectId: "proj1", orgId: "org1", name: "test", key: KEY });
   return buildApp({ repo, store: new InMemoryRunStateStore(() => clock), now: () => clock, ...over });
 }
 
@@ -54,7 +54,7 @@ describe("rate limiting", () => {
     // why: the limiter exists precisely so a looping agent cannot take the
     // control plane down for everyone else.
     const app = await makeApp({ rateLimitPerMinute: 2 });
-    await repo.upsertProject({ id: "proj2", orgId: "org1", name: "other", apiKeyHash: hashApiKey("other-key") });
+    await provisionProject(repo, { projectId: "proj2", orgId: "org1", name: "other", key: "other-key" });
 
     for (let i = 0; i < 5; i++) await app.inject({ method: "GET", url: "/v1/policies", headers: H });
     const other = await app.inject({ method: "GET", url: "/v1/policies", headers: { "x-curb-key": "other-key" } });

@@ -176,13 +176,19 @@ Two conventions matter when reading the evaluators, because they decide whether 
 
 ```
 orgs(id, name, created_at)
-projects(id, org_id, name, api_key_hash, created_at)
+projects(id, org_id, name, api_key_hash, created_at)   -- api_key_hash is legacy; see api_keys
+api_keys(id, org_id, project_id, name, key_hash, role, created_at, revoked_at)
 policies(id, project_id, name, type, scope_json, when_json, params_json, action, enabled, …)
 runs(id, project_id, started_at, ended_at, status, total_tokens, total_cost_usd, step_count, verdict)
 events(id, run_id, project_id, ts, kind, effect, policy_id, reason, context_json, decision_json)
 approvals(id, run_id, project_id, tool_name, args_json, reason, policy_id, status,
           requested_at, decided_at, decided_by)
 ```
+
+`api_keys.project_id` is nullable: `NULL` means the key is org-wide and names its project
+per request via `X-Curb-Project`, checked against the key's org before use. `role` is one
+of `admin`, `operator`, `agent`, `viewer` — capability sets, not a ladder, so an `agent`
+can submit decisions but can never edit the policies that judge it.
 
 `RunState` lives in Redis under `curb:run:{id}` with a 24-hour TTL: `{ tokens, costUsd,
 stepCount, startedAt, sigWindow[], toolWindow[], callTimestamps[] }`. Counters use

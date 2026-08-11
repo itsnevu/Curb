@@ -5,6 +5,7 @@ import { costWindowKeys, evaluate, runKey } from "@curb/policy-engine";
 import { digestArgs, type Context, type Decision, type RunState, type RunStateStore } from "@curb/shared";
 import type { Approval, EventRecord, Repo } from "../repo/types.js";
 import type { Notifier } from "../notify.js";
+import { requireCapability } from "../auth.js";
 
 const DecisionRequestSchema = z.object({
   kind: z.enum(["llm_call", "tool_call", "step"]),
@@ -31,7 +32,7 @@ export interface DecisionDeps {
 }
 
 export function registerDecisions(app: FastifyInstance, deps: DecisionDeps) {
-  app.post("/v1/decisions", async (req, reply) => {
+  app.post("/v1/decisions", { preHandler: requireCapability("decisions:write") }, async (req, reply) => {
     const parsed = DecisionRequestSchema.safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({ error: { message: "invalid request body", details: parsed.error.format() } });

@@ -1,7 +1,11 @@
 import { z } from "zod";
 import type { FastifyInstance } from "fastify";
 import type { ApprovalHub } from "../approval-hub.js";
+import { requireCapability } from "../auth.js";
 import type { Repo } from "../repo/types.js";
+
+const canRead = { preHandler: requireCapability("approvals:read") };
+const canDecide = { preHandler: requireCapability("approvals:decide") };
 
 const DecideSchema = z.object({
   approve: z.boolean(),
@@ -16,7 +20,7 @@ export function registerApprovals(
   hub: ApprovalHub,
   now: () => number,
 ) {
-  app.get("/v1/approvals", async (req) => {
+  app.get("/v1/approvals", canRead, async (req) => {
     const { status } = req.query as { status?: string };
     return repo.listApprovals(req.project!.id, status as never);
   });
@@ -25,7 +29,7 @@ export function registerApprovals(
    * `?wait=ms` enables long-polling: the connection hangs until a decision arrives.
    * Without `wait`, this is an ordinary read.
    */
-  app.get("/v1/approvals/:id", async (req, reply) => {
+  app.get("/v1/approvals/:id", canRead, async (req, reply) => {
     const { id } = req.params as { id: string };
     const { wait } = req.query as { wait?: string };
     const waitMs = Math.min(Number(wait ?? 0) || 0, MAX_WAIT_MS);
@@ -42,7 +46,7 @@ export function registerApprovals(
     return approval;
   });
 
-  app.post("/v1/approvals/:id/decide", async (req, reply) => {
+  app.post("/v1/approvals/:id/decide", canDecide, async (req, reply) => {
     const { id } = req.params as { id: string };
     const parsed = DecideSchema.safeParse(req.body ?? {});
     if (!parsed.success) {

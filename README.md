@@ -12,7 +12,7 @@ your agent touches the outside world.
 
 [![CI](https://github.com/itsnevu/Curb/actions/workflows/ci.yml/badge.svg)](https://github.com/itsnevu/Curb/actions/workflows/ci.yml)
 [![Release](https://github.com/itsnevu/Curb/actions/workflows/release.yml/badge.svg)](https://github.com/itsnevu/Curb/actions/workflows/release.yml)
-[![tests](https://img.shields.io/badge/tests-259%20passing-2f6f4e)](#development)
+[![tests](https://img.shields.io/badge/tests-282%20passing-2f6f4e)](#development)
 [![license](https://img.shields.io/badge/license-MIT-6b6862)](LICENSE)
 
 [![npm](https://img.shields.io/npm/v/@curb/sdk?label=%40curb%2Fsdk&color=cb3837&logo=npm)](https://www.npmjs.com/package/@curb/sdk)
@@ -400,16 +400,74 @@ These are enforced by tests, not just documented.
 
 All endpoints require `x-curb-key` (or `Authorization: Bearer …`). `GET /health` is open.
 
-| Method | Endpoint | Purpose |
+| Method | Endpoint | Purpose | Needs |
+| :-- | :-- | :-- | :-- |
+| `POST` | `/v1/decisions` | Ask for a decision (used by the SDKs) | `agent` |
+| `GET` | `/v1/policies`, `/v1/policies/:id` | Read policies | `viewer` |
+| `POST` `PUT` `DELETE` | `/v1/policies`, `/v1/policies/:id` | Create / update / delete | `admin` |
+| `GET` | `/v1/approvals?status=pending` | Approval queue | `viewer` |
+| `GET` | `/v1/approvals/:id?wait=30000` | Read, or **long-poll** for a decision | `viewer` |
+| `POST` | `/v1/approvals/:id/decide` | `{ "approve": true, "by": "alice" }` | `operator` |
+| `POST` | `/v1/events` | Audit ingest (used by the gateway) | `agent` |
+| `GET` | `/v1/runs`, `/v1/runs/:id`, `/v1/events`, `/v1/stats` | Observability | `viewer` |
+| `GET` | `/v1/me` | Who this key is: org, role, capabilities | any key |
+| `GET` `POST` | `/v1/projects` | List / create projects in your org | `viewer` / `admin` |
+| `GET` `POST` `DELETE` | `/v1/keys`, `/v1/keys/:id` | Mint, list and revoke API keys | `admin` |
+
+"Needs" is the least-privileged role that suffices; `admin` can do everything.
+
+---
+
+## Orgs, projects and roles
+
+An API key is not just a password — it names an **org**, a **project scope** and a **role**.
+
+```
+org ──┬── project ──┬── policies, runs, events, approvals
+      │             └── keys pinned to this project
+      └── project ── …
+      keys scoped org-wide, choosing a project per request
+```
+
+**Tenancy.** Everything is stored per project, and a key can only ever reach projects in
+its own org. A key pinned to one project cannot name another (`403`); an org-wide key
+picks one per request with the `X-Curb-Project` header, and naming a project outside its
+org is a `404` — the same answer a made-up id gets, because whether another tenant's
+project exists is not yours to learn. Run ids come from clients, so run state is keyed by
+project *and* run id: two tenants can pick the same run id without sharing a cost counter.
+
+**Roles.** Capability sets, not a ladder:
+
+| Role | Can | Cannot |
 | :-- | :-- | :-- |
-| `POST` | `/v1/decisions` | Ask for a decision (used by the SDKs) |
-| `GET` `POST` | `/v1/policies` | List / create policies |
-| `GET` `PUT` `DELETE` | `/v1/policies/:id` | Read / update / delete |
-| `GET` | `/v1/approvals?status=pending` | Approval queue |
-| `GET` | `/v1/approvals/:id?wait=30000` | Read, or **long-poll** for a decision |
-| `POST` | `/v1/approvals/:id/decide` | `{ "approve": true, "by": "alice" }` |
-| `POST` | `/v1/events` | Audit ingest (used by the gateway) |
-| `GET` | `/v1/runs`, `/v1/runs/:id`, `/v1/events`, `/v1/stats` | Observability |
+| `admin` | everything, including projects and keys | — |
+| `operator` | read everything, approve/deny held calls | edit policies, manage keys |
+| `agent` | submit decisions and audit events, read policies, poll its own approvals | edit policies, read the audit log |
+| `viewer` | read policies, runs, events, approvals | change anything |
+
+The `agent` role is the point of the split: an agent must be able to ask for a decision
+but must never be able to edit the policy that judges it, or approve its own held call.
+Give your gateway and SDKs an `agent` key, your on-call an `operator` key, and keep
+`admin` for humans who administer the org.
+
+**Minting a key.** The plaintext is returned once and never again — only its SHA-256 hash
+is stored:
+
+```bash
+curl -X POST http://localhost:8090/v1/keys \
+  -H "x-curb-key: $CURB_ADMIN_KEY" -H 'content-type: application/json' \
+  -d '{"name":"prod gateway","role":"agent","projectId":"prod"}'
+# => {"id":"key_1a2b3c4d","role":"agent","key":"curb_XZ…"}   <- copy it now
+
+curl -X DELETE http://localhost:8090/v1/keys/key_1a2b3c4d -H "x-curb-key: $CURB_ADMIN_KEY"
+```
+
+Revocation is permanent and takes effect on the next request. You cannot revoke the key
+you are authenticating with — that would lock the org out mid-request.
+
+**Upgrading from 0.1.x.** Nothing to do. The migration turns each existing project key
+into an `admin` key pinned to that project, so every key keeps exactly the access it had.
+`CURB_API_KEY` still bootstraps a default org, project and admin key on first boot.
 
 ---
 
@@ -455,10 +513,11 @@ Raises `PolicyViolation` (with `.policy_id`, `.tool_name`) and `ApprovalTimeout`
 
 | Variable | Default | Purpose |
 | :-- | :-- | :-- |
-| `CURB_API_KEY` | — | Project API key (gateway, SDKs, dashboard) |
+| `CURB_API_KEY` | — | Bootstrap admin key: provisions the default org, project and key on first boot |
 | `CURB_FAIL_MODE` | `closed` | `closed` = deny when unreachable, `open` = allow |
 | `CURB_ALLOW_ANONYMOUS` | unset | Let the gateway start with no API key. Local dev only — it refuses to boot otherwise |
-| `CURB_PROJECT_ID` | `default` | Project the gateway's key belongs to |
+| `CURB_PROJECT_ID` | `default` | Project the bootstrap key belongs to |
+| `CURB_ORG_ID` | `default` | Org the bootstrap project belongs to |
 | `CURB_RATE_LIMIT_PER_MINUTE` | `600` | Per-project request ceiling on the control plane; `0` disables |
 | `CURB_APPROVAL_TTL_MS` | `3600000` | How long an undecided approval stays actionable |
 | `DATABASE_URL` | — | Postgres. Unset → in-memory (fine for trying it out) |
@@ -580,7 +639,7 @@ call whose estimate would break the limit, but cumulative run spend is only trac
 routed through the gateway. Point your LLM client at the gateway to get the full cap.
 
 **Is it production-ready?**
-The engine, gateway, SDKs, and approval flow are covered by 259 tests (238 TypeScript — 13 of
+The engine, gateway, SDKs, and approval flow are covered by 282 tests (261 TypeScript — 14 of
 them needing live Postgres/Redis — plus 21 Python) including end-to-end runs, and CI exercises
 Postgres, Redis, and the full Docker Compose stack on every push. Every release additionally
 boots the published images and smoke-tests them before the tag is considered good.
@@ -601,7 +660,7 @@ faithful fake upstream), and it is not multi-region or HA.
 - [x] Release automation: one tag publishes GHCR images, npm, and PyPI ([release.yml](.github/workflows/release.yml))
 - [x] **v0.1.0 published** — `ghcr.io/itsnevu/curb-*`, [`@curb/sdk`](https://www.npmjs.com/package/@curb/sdk), [`curb-sdk`](https://pypi.org/project/curb-sdk/)
 - [ ] npm trusted publishing (OIDC), before 2FA-bypass tokens are cut off in Jan 2027
-- [ ] Per-org multi-tenancy and RBAC
+- [x] Per-org multi-tenancy and RBAC — org-scoped keys with `admin`/`operator`/`agent`/`viewer` roles
 - [ ] More providers (Gemini, Bedrock, OpenAI-compatible gateways)
 - [ ] Multi-agent traffic control
 

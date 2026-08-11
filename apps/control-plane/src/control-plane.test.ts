@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { InMemoryRunStateStore } from "@curb/policy-engine";
 import { buildApp } from "./app.js";
-import { hashApiKey } from "./auth.js";
+import { hashApiKey, provisionProject } from "./auth.js";
 import { MemoryRepo } from "./repo/memory.js";
 
 const KEY = "test-key";
@@ -13,7 +13,7 @@ let repo: MemoryRepo;
 
 beforeEach(async () => {
   repo = new MemoryRepo();
-  await repo.upsertProject({ id: "proj1", orgId: "org1", name: "test", apiKeyHash: hashApiKey(KEY) });
+  await provisionProject(repo, { projectId: "proj1", orgId: "org1", name: "test", key: KEY });
   app = buildApp({ repo, store: new InMemoryRunStateStore(() => 1_000), now: () => 1_000 });
 });
 
@@ -39,9 +39,9 @@ describe("auth", () => {
     expect((await app.inject({ method: "GET", url: "/health" })).statusCode).toBe(200);
   });
   it("the API key is never stored in plain text", async () => {
-    const p = await repo.projectByApiKeyHash(hashApiKey(KEY));
-    expect(p!.apiKeyHash).not.toContain(KEY);
-    expect(p!.apiKeyHash).toHaveLength(64);
+    const k = await repo.apiKeyByHash(hashApiKey(KEY));
+    expect(k!.keyHash).not.toContain(KEY);
+    expect(k!.keyHash).toHaveLength(64);
   });
 });
 
@@ -216,7 +216,7 @@ describe("approval flow end-to-end (M2 acceptance)", () => {
 
   it("another project's approval is not visible", async () => {
     const { approvalId } = (await ask()).json();
-    await repo.upsertProject({ id: "proj2", orgId: "org1", name: "other", apiKeyHash: hashApiKey("other-key") });
+    await provisionProject(repo, { projectId: "proj2", orgId: "org1", name: "other", key: "other-key" });
     const res = await get(`/v1/approvals/${approvalId}`, { "x-curb-key": "other-key" });
     expect(res.statusCode).toBe(404);
   });
@@ -276,7 +276,7 @@ describe("dashboard", () => {
 describe("fail mode", () => {
   it("fail-closed denies when the policy repo errors", async () => {
     const broken = new MemoryRepo();
-    await broken.upsertProject({ id: "p", orgId: "o", name: "n", apiKeyHash: hashApiKey(KEY) });
+    await provisionProject(broken, { projectId: "p", orgId: "o", name: "n", key: KEY });
     broken.listPolicies = async () => {
       throw new Error("db is down");
     };
@@ -287,7 +287,7 @@ describe("fail mode", () => {
 
   it("fail-open still lets it through", async () => {
     const broken = new MemoryRepo();
-    await broken.upsertProject({ id: "p", orgId: "o", name: "n", apiKeyHash: hashApiKey(KEY) });
+    await provisionProject(broken, { projectId: "p", orgId: "o", name: "n", key: KEY });
     broken.listPolicies = async () => {
       throw new Error("db is down");
     };

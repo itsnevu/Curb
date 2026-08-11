@@ -1,10 +1,24 @@
 import type { Policy } from "@curb/shared";
+import type { Role } from "../rbac.js";
 
 export interface Project {
   id: string;
   orgId: string;
   name: string;
-  apiKeyHash: string;
+  /** Legacy: a project used to own exactly one key. Keys now live in their own table. */
+  apiKeyHash?: string;
+}
+
+export interface ApiKey {
+  id: string;
+  orgId: string;
+  /** Null/undefined means org-wide: valid for every project in the org. */
+  projectId?: string;
+  name: string;
+  keyHash: string;
+  role: Role;
+  createdAt: number;
+  revokedAt?: number;
 }
 
 export interface EventRecord {
@@ -62,8 +76,18 @@ export interface Repo {
   init(): Promise<void>;
   close(): Promise<void>;
 
-  projectByApiKeyHash(hash: string): Promise<Project | null>;
   upsertProject(p: Project): Promise<Project>;
+  getProject(orgId: string, id: string): Promise<Project | null>;
+  /** Ignores tenancy on purpose: used only to detect a cross-org id collision. */
+  projectById(id: string): Promise<Project | null>;
+  listProjects(orgId: string): Promise<Project[]>;
+
+  /** Returns null for an unknown OR revoked hash — callers must not tell them apart. */
+  apiKeyByHash(hash: string): Promise<ApiKey | null>;
+  createApiKey(key: ApiKey): Promise<ApiKey>;
+  listApiKeys(orgId: string): Promise<ApiKey[]>;
+  /** Revoking is permanent; the hash stays so it can never be issued again. */
+  revokeApiKey(orgId: string, id: string, at: number): Promise<boolean>;
 
   listPolicies(projectId: string): Promise<Policy[]>;
   getPolicy(projectId: string, id: string): Promise<Policy | null>;

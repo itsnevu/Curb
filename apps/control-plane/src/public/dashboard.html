@@ -63,6 +63,8 @@
   <h1>Curb</h1>
   <span class="sub">guardrails and circuit breakers for AI agents</span>
   <span class="dot" id="pulse">connecting…</span>
+  <select class="out" id="projectPick" hidden></select>
+  <span class="dot" id="who" hidden></span>
   <button class="out" id="signOut" hidden>Sign out</button>
 </header>
 
@@ -135,7 +137,18 @@
 // server-injected key would be readable by anyone who can reach the dashboard.
 const STORE_KEY = "curb.apiKey";
 let KEY = sessionStorage.getItem(STORE_KEY) || "";
-const H = () => ({ "x-curb-key": KEY, "content-type": "application/json" });
+// Who this key is, filled in by /v1/me at sign-in. The server decides what the key may
+// do; this copy only decides which controls are worth rendering.
+let ME = { role: "", capabilities: [], orgId: "", scopedProjectId: null };
+let PROJECT = "";
+const may = (cap) => ME.capabilities.includes(cap);
+const H = () => ({
+  "x-curb-key": KEY,
+  "content-type": "application/json",
+  // Harmless for a project-scoped key (it names its own project); required for an
+  // org-wide one, which would otherwise not know which project to act on.
+  ...(PROJECT ? { "x-curb-project": PROJECT } : {}),
+});
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const usd = (n) => "$" + Number(n || 0).toFixed(4);
@@ -171,10 +184,9 @@ function renderApprovals(list) {
       <td><b>${esc(a.toolName)}</b></td>
       <td class="wrap">${esc(a.reason || "")}</td>
       <td class="mono wrap">${esc(JSON.stringify(a.args || {}).slice(0, 160))}</td>
-      <td>
+      <td>${may("approvals:decide") ? `
         <button class="ok" data-approve="${esc(a.id)}">Approve</button>
-        <button class="no" data-deny="${esc(a.id)}">Deny</button>
-      </td>
+        <button class="no" data-deny="${esc(a.id)}">Deny</button>` : "—"}</td>
     </tr>`).join("");
 }
 
@@ -214,20 +226,25 @@ function renderPolicies(list) {
       <td class="mono wrap">${esc(JSON.stringify(p.params))}</td>
       <td>${esc(p.action)}</td>
       <td>${p.enabled ? "yes" : "no"}</td>
-      <td>
+      <td>${may("policies:write") ? `
         <button data-toggle="${esc(p.id)}" data-enabled="${p.enabled}">${p.enabled ? "Disable" : "Enable"}</button>
-        <button class="no" data-del="${esc(p.id)}">Delete</button>
-      </td>
+        <button class="no" data-del="${esc(p.id)}">Delete</button>` : "—"}</td>
     </tr>`).join("");
 }
 
 async function refresh() {
   try {
+    // Only ask for what this role may have. Requesting the rest would work — the server
+    // refuses it — but every poll would paint the page with an error the user cannot act on.
     const [stats, approvals, runs, events, policies] = await Promise.all([
-      api("/v1/stats"), api("/v1/approvals"), api("/v1/runs?limit=25"),
-      api("/v1/events?limit=200"), api("/v1/policies"),
+      may("read") ? api("/v1/stats") : null,
+      may("approvals:read") ? api("/v1/approvals") : [],
+      may("read") ? api("/v1/runs?limit=25") : [],
+      may("read") ? api("/v1/events?limit=200") : [],
+      may("policies:read") ? api("/v1/policies") : [],
     ]);
-    renderStats(stats); renderApprovals(approvals); renderRuns(runs);
+    if (stats) renderStats(stats);
+    renderApprovals(approvals); renderRuns(runs);
     renderEvents(events); renderPolicies(policies);
     $("pulse").textContent = "connected · " + new Date().toLocaleTimeString("en-US");
   } catch (err) {
@@ -283,25 +300,71 @@ function showApp(on) {
   $("login").hidden = on;
   document.querySelector("main").hidden = !on;
   $("signOut").hidden = !on;
+  $("who").hidden = !on;
+  // The policy form is the one control that cannot be hidden per row.
+  $("policyForm").hidden = on && !may("policies:write");
 }
 
 function signOut() {
   sessionStorage.removeItem(STORE_KEY);
   KEY = "";
+  PROJECT = "";
+  ME = { role: "", capabilities: [], orgId: "", scopedProjectId: null };
   if (timer) { clearInterval(timer); timer = null; }
   showApp(false);
+  $("projectPick").hidden = true;
   $("pulse").textContent = "signed out";
 }
 
+/**
+ * Populate the project switcher. A key pinned to one project has nothing to switch
+ * between, so the control stays hidden rather than showing a menu of one.
+ */
+async function loadProjects() {
+  const pick = $("projectPick");
+  if (ME.scopedProjectId || !may("read")) { pick.hidden = true; return; }
+  const projects = await api("/v1/projects");
+  pick.innerHTML = projects.map((p) =>
+    `<option value="${esc(p.id)}"${p.id === PROJECT ? " selected" : ""}>${esc(p.name)} (${esc(p.id)})</option>`).join("");
+  pick.hidden = projects.length < 2;
+}
+
+/** /v1/me, optionally naming a project. Not via api(): this runs before KEY is committed. */
+async function whoami(key, project) {
+  const headers = { "x-curb-key": key, ...(project ? { "x-curb-project": project } : {}) };
+  const res = await fetch("/v1/me", { headers });
+  return { res, body: await res.json().catch(() => ({})) };
+}
+
 async function signIn(key) {
-  const res = await fetch("/v1/stats", { headers: { "x-curb-key": key } });
-  if (!res.ok) throw new Error(res.status === 401 ? "that key was not accepted" : `server error ${res.status}`);
+  // /v1/me is the one endpoint every role may call, so it is what validates the key —
+  // and it answers with the role, which decides everything the page renders next.
+  let { res, body } = await whoami(key, PROJECT);
+
+  // An org-wide key with several projects must name one, and cannot have chosen yet on
+  // a fresh sign-in. Start on the first; the switcher takes over from there. Retried
+  // exactly once, with a project named, so a persistent 400 still surfaces as an error.
+  if (body?.error?.type === "project_required" && body.error.projects?.length) {
+    ({ res, body } = await whoami(key, body.error.projects[0]));
+  }
+  if (!res.ok) {
+    throw new Error(res.status === 401 ? "that key was not accepted" : `server error ${res.status}`);
+  }
+  ME = body;
   KEY = key;
+  PROJECT = ME.projectId;
   sessionStorage.setItem(STORE_KEY, key);
+  $("who").textContent = `${ME.orgId} · ${ME.role}`;
   showApp(true);
+  await loadProjects();
   await refresh();
   if (!timer) timer = setInterval(refresh, 2000);
 }
+
+$("projectPick").addEventListener("change", async (ev) => {
+  PROJECT = ev.target.value;
+  await refresh();
+});
 
 $("signOut").addEventListener("click", signOut);
 

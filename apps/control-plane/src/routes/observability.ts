@@ -2,6 +2,10 @@ import { z } from "zod";
 import type { FastifyInstance } from "fastify";
 import type { EventRecord, Repo, RunSummary } from "../repo/types.js";
 import { NULL_NOTIFIER, type Notifier } from "../notify.js";
+import { requireCapability } from "../auth.js";
+
+const canRead = { preHandler: requireCapability("read") };
+const canWrite = { preHandler: requireCapability("decisions:write") };
 
 const EventSchema = z.object({
   runId: z.string().min(1),
@@ -23,7 +27,7 @@ const IngestSchema = z.object({
 
 /** Audit ingest from the gateway and SDKs, plus run/event reads for the dashboard. */
 export function registerObservability(app: FastifyInstance, repo: Repo, notifier: Notifier = NULL_NOTIFIER) {
-  app.post("/v1/events", async (req, reply) => {
+  app.post("/v1/events", canWrite, async (req, reply) => {
     const parsed = IngestSchema.safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({ error: { message: "invalid event batch" } });
@@ -56,25 +60,25 @@ export function registerObservability(app: FastifyInstance, repo: Repo, notifier
     return { ok: true, accepted: events.length };
   });
 
-  app.get("/v1/runs", async (req) => {
+  app.get("/v1/runs", canRead, async (req) => {
     const { limit } = req.query as { limit?: string };
     return repo.listRuns(req.project!.id, Math.min(Number(limit ?? 50) || 50, 200));
   });
 
-  app.get("/v1/runs/:id", async (req, reply) => {
+  app.get("/v1/runs/:id", canRead, async (req, reply) => {
     const { id } = req.params as { id: string };
     const run = await repo.getRun(req.project!.id, id);
     if (!run) return reply.code(404).send({ error: { message: "run not found" } });
     return { ...run, events: await repo.listEvents(req.project!.id, { runId: id, limit: 200 }) };
   });
 
-  app.get("/v1/events", async (req) => {
+  app.get("/v1/events", canRead, async (req) => {
     const { runId, limit } = req.query as { runId?: string; limit?: string };
     return repo.listEvents(req.project!.id, { runId, limit: Math.min(Number(limit ?? 100) || 100, 500) });
   });
 
   /** Summary numbers for the dashboard cards. */
-  app.get("/v1/stats", async (req) => {
+  app.get("/v1/stats", canRead, async (req) => {
     const projectId = req.project!.id;
     const [runs, events, pending] = await Promise.all([
       repo.listRuns(projectId, 200),

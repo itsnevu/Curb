@@ -1,7 +1,7 @@
 import { InMemoryRunStateStore } from "../packages/policy-engine/src/index.js";
 import { Curb, PolicyViolation } from "../packages/sdk-ts/src/index.js";
 import { buildApp as buildControlPlane } from "../apps/control-plane/src/app.js";
-import { hashApiKey } from "../apps/control-plane/src/auth.js";
+import { provisionProject } from "../apps/control-plane/src/auth.js";
 import { MemoryRepo } from "../apps/control-plane/src/repo/memory.js";
 import { buildApp as buildGateway } from "../apps/gateway/src/app.js";
 import { HttpAuditSink } from "../apps/gateway/src/audit.js";
@@ -27,7 +27,7 @@ async function main() {
   process.env.OPENAI_UPSTREAM = provider.url;
 
   const repo = new MemoryRepo();
-  await repo.upsertProject({ id: "demo", orgId: "demo", name: "demo", apiKeyHash: hashApiKey(KEY) });
+  await provisionProject(repo, { projectId: "demo", orgId: "demo", name: "demo", key: KEY });
   const store = new InMemoryRunStateStore(() => Date.now());
 
   const cp = buildControlPlane({ repo, store });

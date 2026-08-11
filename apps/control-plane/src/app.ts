@@ -12,6 +12,7 @@ import type { Repo } from "./repo/types.js";
 import { registerApprovals } from "./routes/approvals.js";
 import { registerDecisions } from "./routes/decisions.js";
 import { registerObservability } from "./routes/observability.js";
+import { registerOrg } from "./routes/org.js";
 import { registerPolicies } from "./routes/policies.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -85,6 +86,7 @@ export function buildApp(deps: ControlPlaneDeps): FastifyInstance {
     registerPolicies(api, deps.repo);
     registerApprovals(api, deps.repo, hub, now);
     registerObservability(api, deps.repo, deps.notifier ?? NULL_NOTIFIER);
+    registerOrg(api, deps.repo, now);
   });
 
   app.decorate("approvalHub", hub);

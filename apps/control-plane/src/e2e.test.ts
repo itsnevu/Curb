@@ -3,7 +3,7 @@ import type { FastifyInstance } from "fastify";
 import { InMemoryRunStateStore } from "@curb/policy-engine";
 import { Curb, PolicyViolation } from "@curb/sdk";
 import { buildApp } from "./app.js";
-import { hashApiKey } from "./auth.js";
+import { provisionProject } from "./auth.js";
 import { MemoryRepo } from "./repo/memory.js";
 
 /**
@@ -20,7 +20,7 @@ const H = { "x-curb-key": KEY, "content-type": "application/json" };
 
 beforeEach(async () => {
   repo = new MemoryRepo();
-  await repo.upsertProject({ id: "proj1", orgId: "org1", name: "e2e", apiKeyHash: hashApiKey(KEY) });
+  await provisionProject(repo, { projectId: "proj1", orgId: "org1", name: "e2e", key: KEY });
   app = buildApp({ repo, store: new InMemoryRunStateStore(() => Date.now()) });
   await app.listen({ port: 0, host: "127.0.0.1" });
   const addr = app.server.address();

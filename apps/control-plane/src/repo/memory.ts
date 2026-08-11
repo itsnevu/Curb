@@ -1,5 +1,6 @@
 import type { Policy } from "@curb/shared";
 import type {
+  ApiKey,
   Approval,
   ApprovalStatus,
   DecideResult,
@@ -12,6 +13,7 @@ import type {
 /** In-memory repo: used by tests and by dev mode without Postgres. */
 export class MemoryRepo implements Repo {
   private projects = new Map<string, Project>();
+  private apiKeys = new Map<string, ApiKey>();
   private policies = new Map<string, Map<string, Policy>>();
   private events: EventRecord[] = [];
   private approvals = new Map<string, Approval>();
@@ -21,12 +23,39 @@ export class MemoryRepo implements Repo {
   async init() {}
   async close() {}
 
-  async projectByApiKeyHash(hash: string): Promise<Project | null> {
-    return [...this.projects.values()].find((p) => p.apiKeyHash === hash) ?? null;
-  }
   async upsertProject(p: Project): Promise<Project> {
     this.projects.set(p.id, p);
     return p;
+  }
+  async getProject(orgId: string, id: string): Promise<Project | null> {
+    const p = this.projects.get(id);
+    return p && p.orgId === orgId ? p : null;
+  }
+  async projectById(id: string): Promise<Project | null> {
+    return this.projects.get(id) ?? null;
+  }
+  async listProjects(orgId: string): Promise<Project[]> {
+    return [...this.projects.values()].filter((p) => p.orgId === orgId).sort((a, b) => a.id.localeCompare(b.id));
+  }
+
+  async apiKeyByHash(hash: string): Promise<ApiKey | null> {
+    const k = [...this.apiKeys.values()].find((x) => x.keyHash === hash);
+    return k && !k.revokedAt ? k : null;
+  }
+  async createApiKey(key: ApiKey): Promise<ApiKey> {
+    this.apiKeys.set(key.id, key);
+    return key;
+  }
+  async listApiKeys(orgId: string): Promise<ApiKey[]> {
+    return [...this.apiKeys.values()]
+      .filter((k) => k.orgId === orgId)
+      .sort((a, b) => b.createdAt - a.createdAt);
+  }
+  async revokeApiKey(orgId: string, id: string, at: number): Promise<boolean> {
+    const k = this.apiKeys.get(id);
+    if (!k || k.orgId !== orgId || k.revokedAt) return false;
+    this.apiKeys.set(id, { ...k, revokedAt: at });
+    return true;
   }
 
   private bucket(projectId: string) {

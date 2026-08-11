@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { Pool } from "pg";
 import type { Policy } from "@curb/shared";
 import type {
+  ApiKey,
   Approval,
   ApprovalStatus,
   DecideResult,
@@ -52,15 +53,6 @@ export class PostgresRepo implements Repo {
     await this.pool.end();
   }
 
-  async projectByApiKeyHash(hash: string): Promise<Project | null> {
-    const r = await this.pool.query(
-      "SELECT id, org_id, name, api_key_hash FROM projects WHERE api_key_hash = $1",
-      [hash],
-    );
-    const row = r.rows[0];
-    return row ? { id: row.id, orgId: row.org_id, name: row.name, apiKeyHash: row.api_key_hash } : null;
-  }
-
   async upsertProject(p: Project): Promise<Project> {
     await this.pool.query(
       "INSERT INTO orgs(id, name) VALUES ($1, $1) ON CONFLICT (id) DO NOTHING",
@@ -68,10 +60,59 @@ export class PostgresRepo implements Repo {
     );
     await this.pool.query(
       `INSERT INTO projects(id, org_id, name, api_key_hash) VALUES ($1,$2,$3,$4)
-       ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, api_key_hash = EXCLUDED.api_key_hash`,
-      [p.id, p.orgId, p.name, p.apiKeyHash],
+       ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name,
+         api_key_hash = COALESCE(EXCLUDED.api_key_hash, projects.api_key_hash)`,
+      [p.id, p.orgId, p.name, p.apiKeyHash ?? null],
     );
     return p;
+  }
+
+  async getProject(orgId: string, id: string): Promise<Project | null> {
+    const r = await this.pool.query("SELECT * FROM projects WHERE org_id = $1 AND id = $2", [orgId, id]);
+    return r.rows[0] ? rowToProject(r.rows[0]) : null;
+  }
+
+  async projectById(id: string): Promise<Project | null> {
+    const r = await this.pool.query("SELECT * FROM projects WHERE id = $1", [id]);
+    return r.rows[0] ? rowToProject(r.rows[0]) : null;
+  }
+
+  async listProjects(orgId: string): Promise<Project[]> {
+    const r = await this.pool.query("SELECT * FROM projects WHERE org_id = $1 ORDER BY id", [orgId]);
+    return r.rows.map(rowToProject);
+  }
+
+  async apiKeyByHash(hash: string): Promise<ApiKey | null> {
+    const r = await this.pool.query(
+      "SELECT * FROM api_keys WHERE key_hash = $1 AND revoked_at IS NULL",
+      [hash],
+    );
+    return r.rows[0] ? rowToApiKey(r.rows[0]) : null;
+  }
+
+  async createApiKey(key: ApiKey): Promise<ApiKey> {
+    await this.pool.query(
+      `INSERT INTO api_keys(id, org_id, project_id, name, key_hash, role, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [key.id, key.orgId, key.projectId ?? null, key.name, key.keyHash, key.role, new Date(key.createdAt)],
+    );
+    return key;
+  }
+
+  async listApiKeys(orgId: string): Promise<ApiKey[]> {
+    const r = await this.pool.query(
+      "SELECT * FROM api_keys WHERE org_id = $1 ORDER BY created_at DESC LIMIT 200",
+      [orgId],
+    );
+    return r.rows.map(rowToApiKey);
+  }
+
+  async revokeApiKey(orgId: string, id: string, at: number): Promise<boolean> {
+    const r = await this.pool.query(
+      "UPDATE api_keys SET revoked_at = $3 WHERE org_id = $1 AND id = $2 AND revoked_at IS NULL",
+      [orgId, id, new Date(at)],
+    );
+    return (r.rowCount ?? 0) > 0;
   }
 
   async listPolicies(projectId: string): Promise<Policy[]> {
@@ -210,6 +251,23 @@ export class PostgresRepo implements Repo {
     const r = await this.pool.query("SELECT * FROM runs WHERE project_id=$1 AND id=$2", [projectId, id]);
     return r.rows[0] ? rowToRun(r.rows[0]) : null;
   }
+}
+
+function rowToProject(row: Record<string, any>): Project {
+  return { id: row.id, orgId: row.org_id, name: row.name, apiKeyHash: row.api_key_hash ?? undefined };
+}
+
+function rowToApiKey(row: Record<string, any>): ApiKey {
+  return {
+    id: row.id,
+    orgId: row.org_id,
+    projectId: row.project_id ?? undefined,
+    name: row.name,
+    keyHash: row.key_hash,
+    role: row.role,
+    createdAt: new Date(row.created_at).getTime(),
+    revokedAt: row.revoked_at ? new Date(row.revoked_at).getTime() : undefined,
+  };
 }
 
 function rowToPolicy(row: Record<string, any>): Policy {

@@ -2,7 +2,11 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { FastifyInstance } from "fastify";
 import { PolicySchema, PolicyShapeSchema } from "@curb/shared";
+import { requireCapability } from "../auth.js";
 import type { Repo } from "../repo/types.js";
+
+const canRead = { preHandler: requireCapability("policies:read") };
+const canWrite = { preHandler: requireCapability("policies:write") };
 
 /** The server may generate the id; everything else must satisfy PolicySchema. */
 const CreateSchema = PolicyShapeSchema.extend({
@@ -13,15 +17,15 @@ const CreateSchema = PolicyShapeSchema.extend({
 });
 
 export function registerPolicies(app: FastifyInstance, repo: Repo) {
-  app.get("/v1/policies", async (req) => repo.listPolicies(req.project!.id));
+  app.get("/v1/policies", canRead, async (req) => repo.listPolicies(req.project!.id));
 
-  app.get("/v1/policies/:id", async (req, reply) => {
+  app.get("/v1/policies/:id", canRead, async (req, reply) => {
     const { id } = req.params as { id: string };
     const p = await repo.getPolicy(req.project!.id, id);
     return p ?? reply.code(404).send({ error: { message: "policy not found" } });
   });
 
-  app.post("/v1/policies", async (req, reply) => {
+  app.post("/v1/policies", canWrite, async (req, reply) => {
     const parsed = CreateSchema.safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({ error: { message: "invalid policy", details: parsed.error.format() } });
@@ -37,7 +41,7 @@ export function registerPolicies(app: FastifyInstance, repo: Repo) {
     return reply.code(201).send(full.data);
   });
 
-  app.put("/v1/policies/:id", async (req, reply) => {
+  app.put("/v1/policies/:id", canWrite, async (req, reply) => {
     const { id } = req.params as { id: string };
     const existing = await repo.getPolicy(req.project!.id, id);
     if (!existing) return reply.code(404).send({ error: { message: "policy not found" } });
@@ -49,7 +53,7 @@ export function registerPolicies(app: FastifyInstance, repo: Repo) {
     return parsed.data;
   });
 
-  app.delete("/v1/policies/:id", async (req, reply) => {
+  app.delete("/v1/policies/:id", canWrite, async (req, reply) => {
     const { id } = req.params as { id: string };
     const ok = await repo.deletePolicy(req.project!.id, id);
     return ok ? { ok: true } : reply.code(404).send({ error: { message: "policy not found" } });
