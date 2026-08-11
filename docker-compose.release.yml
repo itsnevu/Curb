@@ -3,7 +3,7 @@
 #   curl -O https://raw.githubusercontent.com/itsnevu/Curb/main/docker-compose.release.yml
 #   CURB_API_KEY=your-own-key docker compose -f docker-compose.release.yml up -d
 #
-# Pin a release with CURB_VERSION (e.g. CURB_VERSION=0.1.0); the default tracks latest.
+# Pin a release with CURB_VERSION (e.g. CURB_VERSION=0.2.0); the default tracks latest.
 # Contributors who want to build from source should use docker-compose.yml instead.
 services:
   postgres:

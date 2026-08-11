@@ -104,10 +104,10 @@ Images are published for `linux/amd64` and `linux/arm64`:
 
 | Image | Tags |
 | :-- | :-- |
-| `ghcr.io/itsnevu/curb-gateway` | `0.1.0`, `0.1`, `latest` |
-| `ghcr.io/itsnevu/curb-control-plane` | `0.1.0`, `0.1`, `latest` |
+| `ghcr.io/itsnevu/curb-gateway` | `0.2.0`, `0.2`, `latest` |
+| `ghcr.io/itsnevu/curb-control-plane` | `0.2.0`, `0.2`, `latest` |
 
-Pin a release with `CURB_VERSION=0.1.0`; the default tracks `latest`. **Pin it in
+Pin a release with `CURB_VERSION=0.2.0`; the default tracks `latest`. **Pin it in
 production** — `latest` moving under you is exactly the kind of surprise Curb exists to
 prevent.
 
@@ -559,7 +559,7 @@ Zod / Pydantic · Vitest / pytest · pnpm workspaces.
 
 ```bash
 pnpm install
-pnpm test          # 225 TypeScript tests (238 with Postgres + Redis running)
+pnpm test          # 247 TypeScript tests (261 with Postgres + Redis running)
 pnpm typecheck     # build + tsc --noEmit across every package
 pnpm demo          # end-to-end demo in a single process
 
@@ -659,6 +659,7 @@ faithful fake upstream), and it is not multi-region or HA.
 - [x] CI: build, typecheck, tests against real Postgres + Redis, and a Docker Compose smoke test
 - [x] Release automation: one tag publishes GHCR images, npm, and PyPI ([release.yml](.github/workflows/release.yml))
 - [x] **v0.1.0 published** — `ghcr.io/itsnevu/curb-*`, [`@curb/sdk`](https://www.npmjs.com/package/@curb/sdk), [`curb-sdk`](https://pypi.org/project/curb-sdk/)
+- [x] **v0.2.0** — per-org multi-tenancy and RBAC
 - [ ] npm trusted publishing (OIDC), before 2FA-bypass tokens are cut off in Jan 2027
 - [x] Per-org multi-tenancy and RBAC — org-scoped keys with `admin`/`operator`/`agent`/`viewer` roles
 - [ ] More providers (Gemini, Bedrock, OpenAI-compatible gateways)

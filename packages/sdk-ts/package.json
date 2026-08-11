@@ -1,6 +1,6 @@
 {
   "name": "@curb/sdk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Curb SDK — cost/loop circuit breakers and ask-before-acting guardrails for AI agents",
   "keywords": ["ai", "agent", "guardrail", "circuit-breaker", "llm", "cost-control", "observability"],
   "homepage": "https://github.com/itsnevu/Curb#readme",

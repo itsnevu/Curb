@@ -1,6 +1,6 @@
 {
   "name": "@curb/shared",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Shared wire types, policy schemas, and argument redaction for Curb",
   "homepage": "https://github.com/itsnevu/Curb#readme",
   "bugs": "https://github.com/itsnevu/Curb/issues",

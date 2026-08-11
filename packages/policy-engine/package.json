@@ -1,6 +1,6 @@
 {
   "name": "@curb/policy-engine",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Curb's policy evaluation engine — internal to the gateway and control plane",
   "license": "MIT",
   "//": "Private for now: the servers that use it ship as Docker images, and agents talk to Curb over HTTP via @curb/sdk. Publishing this would commit us to its API.",
